@@ -57,7 +57,8 @@
             if (!keyword) return alert("건물명을 입력해주세요!");
 
             try {
-                const response = await fetch(`http://localhost:3000/api/elevators?keyword=${encodeURIComponent(keyword)}`);
+                // 수정된 부분: localhost를 지우고 '/api/elevators' 상대 경로로 변경!
+                const response = await fetch(`/api/elevators?keyword=${encodeURIComponent(keyword)}`);
                 const data = await response.json();
 
                 if (data.length === 0) {
