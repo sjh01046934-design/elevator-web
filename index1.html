@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>전국 승강기 위치 지도 지도앱</title>
+    <!-- 카카오 맵 로딩 스크립트 (안전한 동적 로딩 적용) -->
+    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=59f58919246c9ac3780496fc7e2c0d74&autoload=false"></script>
+    <style>
+        /* 화면 전체를 지도로 꽉 채우도록 스타일 강제 지정 */
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+        #map { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* 검색창이 지도 위로 둥둥 뜨도록 설정 */
+        #search-box { position: absolute; top: 15px; left: 15px; z-index: 10; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,0.2); display: flex; gap: 6px; }
+        #keyword { padding: 10px; border: 1px solid #ccc; border-radius: 4px; width: 220px; font-size: 14px; }
+        #search-btn { padding: 10px 18px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        #search-btn:hover { background: #1d4ed8; }
+    </style>
+</head>
+<body>
+
+    <!-- 검색창 UI -->
+    <div id="search-box">
+        <input type="text" id="keyword" placeholder="건물명을 입력하세요 (예: 스타벅스)" value="스타벅스">
+        <button id="search-btn" onclick="searchElevators()">검색</button>
+    </div>
+
+    <!-- 지도가 그려질 캔버스 도화지 -->
+    <div id="map"></div>
+
+    <script>
+        let map;
+        let markers = []; 
+
+        // 브라우저가 화면을 다 그리면 안전하게 카카오 지도를 띄우는 로직
+        window.onload = function() {
+            if (typeof kakao !== 'undefined') {
+                kakao.maps.load(function() {
+                    const mapContainer = document.getElementById('map');
+                    const mapOption = { 
+                        center: new kakao.maps.LatLng(36.48008, 127.28921), // 세종시청 중심
+                        level: 4 
+                    }; 
+                    // 실제 지도 객체 생성
+                    map = new kakao.maps.Map(mapContainer, mapOption);
+                    console.log("🚀 [성공] 카카오 지도가 화면에 정상적으로 로드되었습니다!");
+                });
+            } else {
+                alert("카카오 라이브러리가 로드되지 않았습니다. 인터넷 연결이나 앱 키를 확인하세요.");
+            }
+        };
+
+        // 데이터베이스 검색 및 마커 표시 함수
+        async function searchElevators() {
+            const keyword = document.getElementById('keyword').value;
+            if (!keyword) return alert("건물명을 입력해주세요!");
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/elevators?keyword=${encodeURIComponent(keyword)}`);
+                const data = await response.json();
+
+                if (data.length === 0) {
+                    alert("검색 결과가 없습니다.");
+                    return;
+                }
+
+                // 기존 마커 싹 지우기
+                if (markers.length > 0) {
+                    markers.forEach(marker => marker.setMap(null));
+                    markers = [];
+                }
+
+                // 90만 대 데이터 중 검색된 좌표에 핀 꽂기
+                data.forEach(item => {
+                    if (item.위도 && item.경도) {
+                        const markerPosition = new kakao.maps.LatLng(Number(item.위도), Number(item.경도));
+                        
+                        const marker = new kakao.maps.Marker({
+                            position: markerPosition
+                        });
+                        marker.setMap(map);
+                        markers.push(marker);
+
+                        // 마커 클릭 시 말풍선 표시
+                        const infowindow = new kakao.maps.InfoWindow({
+                            content: `<div style="padding:8px;font-size:12px;width:220px;color:#333;line-height:1.4;"><b>${item.건물명}</b><br><span style="color:#666;">고유번호: ${item.승강기고유번호}</span></div>`
+                        });
+                        
+                        kakao.maps.event.addListener(marker, 'click', () => {
+                            infowindow.open(map, marker);
+                        });
+                    }
+                });
+
+                // 첫 번째 검색 건물로 지도 스르륵 이동
+                if (data[0].위도 && data[0].경도) {
+                    const moveLatLon = new kakao.maps.LatLng(Number(data[0].위도), Number(data[0].경도));
+                    map.panTo(moveLatLon);
+                }
+
+            } catch (error) {
+                console.error("데이터 로드 실패:", error);
+                alert("API 서버 통신 에러가 발생했습니다.");
+            }
+        }
+    </script>
+</body>
+</html>
