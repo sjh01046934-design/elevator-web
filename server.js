@@ -6,6 +6,9 @@ const path = require('path');
 const app = express();
 app.use(cors()); // 외부 웹/앱에서 접속 허용
 
+// index1.html을 정상적으로 띄우기 위한 정적 파일 제공 설정 추가
+app.use(express.static(__dirname)); 
+
 // 1. 데이터베이스 연결 설정 (Supabase 클라우드 데이터베이스)
 const pool = new Pool({
     // Supabase의 Pooler 연결 주소를 사용합니다.
@@ -24,7 +27,7 @@ app.get('/api/elevators', async (req, res) => {
     }
 
     try {
-        // [핵심 수정] JOIN을 사용해 승강기 정보와 좌표를 한 번에 가져옵니다.
+        // [유지] A.* 를 통해 승강기의 모든 제원(종류, 상태, 하중, 설치일 등)을 가져옵니다.
         const sql = `
             SELECT A.*, B.위도, B.경도 
             FROM elevators_raw A
@@ -48,10 +51,12 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index1.html')); 
 });
 
-// 4. 통신 서버 켜기 (3000번 포트)
-app.listen(3000, () => {
-    console.log("🚀 승강기 API 서버가 클라우드 DB(Supabase) 모드로 3000번 포트에서 가동을 시작했습니다!");
+// 4. 통신 서버 켜기 (Render 클라우드 환경에 맞게 자동 포트 할당 적용)
+// 💡 클라우드 서버는 3000번을 강제하면 에러가 날 수 있어 process.env.PORT를 우선 사용합니다.
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+    console.log(`🚀 승강기 API 서버가 클라우드 DB(Supabase) 모드로 ${port}번 포트에서 가동을 시작했습니다!`);
 });
 
-// [Vercel 배포용 필수 코드] 클라우드 환경에서 이 앱을 실행할 수 있도록 내보냅니다.
+// 클라우드 환경에서 이 앱을 실행할 수 있도록 내보냅니다.
 module.exports = app;
