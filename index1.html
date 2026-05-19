@@ -37,7 +37,6 @@
         .dropdown-item:last-child { border-bottom: none; }
         .dropdown-item:hover { background-color: #f8fafc; }
         .item-text { font-size: 14px; font-weight: 500; color: #333; display: flex; flex-direction: column; gap: 4px; flex: 1; }
-        .item-tag { font-size: 10px; background: #edf2f7; color: #4a5568; padding: 2px 6px; border-radius: 4px; display:inline-block; width: fit-content; }
         .item-delete { color: #ccc; padding: 4px 0 4px 12px; font-size: 14px; }
         
         .fab-container { position: absolute; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); right: 16px; display: flex; flex-direction: column; gap: 10px; z-index: 9; }
@@ -220,23 +219,21 @@
         }
     }
 
-    // ★ 카카오 장소 검색 (상호명 검색 시 빠른 주소 확보용)
     function searchKakaoPlaces(query) {
         places.keywordSearch(query, function(result, status) {
             if (status === kakao.maps.services.Status.OK) {
                 renderPlaceList(result, query);
             } else {
-                // 카카오에 안 나오면 바로 우리 DB 검색으로 넘김
                 executeDatabaseSearch(query);
             }
         });
     }
 
+    // [핵심 변경] 장소 클릭 시 주소(도로명+지번)를 추출하여 DB 검색에 활용
     function renderPlaceList(placesResult, keyword) {
         const dropdown = document.getElementById('searchDropdown');
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 아래 버튼을 누르세요👇</div>`;
         
-        // 장소 선택 무시하고 바로 DB 전체 검색하는 버튼 추가
         const searchAllDiv = document.createElement('div');
         searchAllDiv.className = 'dropdown-item';
         searchAllDiv.innerHTML = `<div class="item-text" onclick="executeDatabaseSearch('${keyword}')" style="color:#1e4e79; font-weight:bold; text-align:center;">🚀 '${keyword}' (으)로 DB 전체 검색하기</div>`;
@@ -246,9 +243,19 @@
             const div = document.createElement('div');
             div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
-            // 카카오에서 찾은 상호명이나 주소를 클릭하면 해당 이름으로 우리 DB에 요청!
+            
+            // 카카오 주소에서 검색에 유리한 '도로명/동이름 + 지번' 조합 추출
+            let searchKeyword = place.place_name;
+            if (displayAddr) {
+                let words = displayAddr.split(' ');
+                if (words.length >= 2) {
+                    searchKeyword = words[words.length - 2] + ' ' + words[words.length - 1];
+                }
+            }
+
+            // 클릭 시 겉으론 장소명을 띄우지만, 백그라운드로는 추출한 주소(searchKeyword)로 검색합니다!
             div.innerHTML = `
-                <div class="item-text" onclick="executeDatabaseSearch('${place.place_name}')">
+                <div class="item-text" onclick="document.getElementById('searchInput').value='${place.place_name}'; executeDatabaseSearch('${searchKeyword}');">
                     <span style="font-weight:bold; color:#333;">🏢 ${place.place_name}</span>
                     <span style="font-size:11px; color:#666;">📍 ${displayAddr}</span>
                 </div>
@@ -258,9 +265,6 @@
         dropdown.style.display = 'block';
     }
 
-    // =========================================================
-    // ★ 핵심 변경 포인트: Render 서버(Supabase DB)로 직접 요청!!
-    // =========================================================
     async function executeDatabaseSearch(keyword) {
         closeDropdown();
         closeBottomSheet();
@@ -271,11 +275,11 @@
 
         if (!keyword) return alert("검색어를 입력해주세요.");
 
-        showLoadingMsg(`⏳ DB에서 '${keyword}' 승강기 데이터를 가져오는 중...`);
-        saveRecentSearch(keyword);
+        showLoadingMsg(`⏳ DB에서 데이터를 검색 중입니다...`);
+        // 보여지는 검색어(상호명)를 로컬스토리지에 저장
+        saveRecentSearch(document.getElementById('searchInput').value || keyword); 
 
         try {
-            // 과거의 수백 줄짜리 Cloudflare 코드가 이 2줄로 끝납니다!
             const response = await fetch(`/api/elevators?keyword=${encodeURIComponent(keyword)}`, { signal });
             if (!response.ok) throw new Error("서버 응답 오류");
             
@@ -283,11 +287,11 @@
             
             if (data.length === 0) {
                 hideLoadingMsg();
-                alert(`'${keyword}'에 대한 검색 결과가 없습니다.`);
+                alert(`해당 위치 또는 이름으로 등록된 승강기가 없습니다.\n건물 주소나 건물의 정식 명칭으로 다시 검색해 보세요.`);
                 return;
             }
 
-            allElevatorsData = data; // DB에서 받아온 즉시 사용 가능
+            allElevatorsData = data; 
             buildGlobalGroups();
             hideLoadingMsg();
 
@@ -304,8 +308,6 @@
         if (event) event.preventDefault();
         const query = document.getElementById('searchInput').value.trim();
         if (query === '') return alert("검색어를 입력해주세요.");
-        
-        // 카카오 장소를 거쳐서 찾을지, 바로 찾을지
         searchKakaoPlaces(query);
     }
 
@@ -313,7 +315,6 @@
     function fastClearSearch() { document.getElementById('searchInput').value = ''; document.getElementById('searchInput').focus(); }
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
 
-    // 최근 검색어 로직
     function handleInputFocus() {
         const val = document.getElementById('searchInput').value.trim();
         if (!val) renderRecentSearches();
@@ -338,7 +339,7 @@
             const div = document.createElement('div');
             div.className = 'dropdown-item';
             div.innerHTML = `
-                <div class="item-text" onclick="executeDatabaseSearch('${query}')">
+                <div class="item-text" onclick="document.getElementById('searchInput').value='${query}'; searchKakaoPlaces('${query}')">
                     <div style="font-weight:bold;">${query}</div>
                 </div>
             `;
@@ -348,18 +349,14 @@
     }
     function clearAllRecent() { localStorage.removeItem('elevator_recent_fast'); renderRecentSearches(); }
 
-    // =========================================================
-    // ★ DB 데이터를 기존 멋진 UI용 그룹으로 변환
-    // =========================================================
     function buildGlobalGroups() {
         const groupedMap = new Map();
 
         allElevatorsData.forEach(item => {
-            // DB 컬럼명 매칭 (한국어/영어 둘 다 대응)
+            // DB 컬럼 매칭 (진호님 DB의 '건물주소' 반영)
             const buldNm = item.건물명 || item.buldNm || "건물명 없음";
-            // 주소가 DB에 없다면 일단 '-' 처리 (server.js 업데이트 시 자동 반영)
-            const address = item.주소 || item.도로명주소 || item.address1 || "-"; 
-            const key = `${buldNm}`; // 건물 단위로 묶음
+            const address = item.건물주소 || item.도로명주소 || item.address1 || "-"; 
+            const key = `${buldNm}`; 
 
             if (!groupedMap.has(key)) {
                 groupedMap.set(key, {
@@ -398,7 +395,7 @@
         let validMarkerCount = 0;
 
         globalGroups.forEach(group => {
-            if(group.lat === 0 || group.lng === 0) return; // 좌표 없는 데이터 방어
+            if(group.lat === 0 || group.lng === 0) return; 
 
             const isAllStopped = group.elevators.every(e => !e.isOperating);
             const content = document.createElement('div');
