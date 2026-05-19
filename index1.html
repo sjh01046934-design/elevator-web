@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>승강기 지도 - 초고속 검색서비스</title>
+    <title>승강기 지도 - 초정밀 좌표 탐색</title>
     
     <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=59f58919246c9ac3780496fc7e2c0d74&libraries=services,clusterer&autoload=false"></script>
     
     <style>
+        /* 기존과 완벽히 동일한 CSS 생략 없이 전체 포함 */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background-color: #f0f2f5; display: flex; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
         .app-container { width: 100%; max-width: 412px; height: 100vh; background-color: #e5e5e5; position: relative; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.15); }
@@ -147,9 +148,11 @@
     let map;
     let clusterer; 
     let places; 
+    let geocoder; // [추가] 좌표 변환기
     
     let allElevatorsData = []; 
     let globalGroups = []; 
+    let geocodeCache = new Map(); // [추가] 좌표 캐싱
     let currentAbortController = null; 
     const markerSvgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V1zm1.5 1v12h9V2h-9zM5.5 4h1v8h-1V4zm4 0h1v8h-1V4z"/></svg>`;
 
@@ -157,7 +160,9 @@
         const container = document.getElementById('map');
         const options = { center: new kakao.maps.LatLng(36.48008, 127.28921), level: 8 };
         map = new kakao.maps.Map(container, options);
+        
         places = new kakao.maps.services.Places(); 
+        geocoder = new kakao.maps.services.Geocoder(); // [추가]
 
         clusterer = new kakao.maps.MarkerClusterer({
             map: map,
@@ -229,7 +234,6 @@
         });
     }
 
-    // [핵심 변경] 장소 클릭 시 주소(도로명+지번)를 추출하여 DB 검색에 활용
     function renderPlaceList(placesResult, keyword) {
         const dropdown = document.getElementById('searchDropdown');
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 아래 버튼을 누르세요👇</div>`;
@@ -244,7 +248,6 @@
             div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
             
-            // 카카오 주소에서 검색에 유리한 '도로명/동이름 + 지번' 조합 추출
             let searchKeyword = place.place_name;
             if (displayAddr) {
                 let words = displayAddr.split(' ');
@@ -253,7 +256,6 @@
                 }
             }
 
-            // 클릭 시 겉으론 장소명을 띄우지만, 백그라운드로는 추출한 주소(searchKeyword)로 검색합니다!
             div.innerHTML = `
                 <div class="item-text" onclick="document.getElementById('searchInput').value='${place.place_name}'; executeDatabaseSearch('${searchKeyword}');">
                     <span style="font-weight:bold; color:#333;">🏢 ${place.place_name}</span>
@@ -276,7 +278,6 @@
         if (!keyword) return alert("검색어를 입력해주세요.");
 
         showLoadingMsg(`⏳ DB에서 데이터를 검색 중입니다...`);
-        // 보여지는 검색어(상호명)를 로컬스토리지에 저장
         saveRecentSearch(document.getElementById('searchInput').value || keyword); 
 
         try {
@@ -293,7 +294,6 @@
 
             allElevatorsData = data; 
             buildGlobalGroups();
-            hideLoadingMsg();
 
         } catch (error) {
             hideLoadingMsg();
@@ -353,10 +353,9 @@
         const groupedMap = new Map();
 
         allElevatorsData.forEach(item => {
-            // DB 컬럼 매칭 (진호님 DB의 '건물주소' 반영)
             const buldNm = item.건물명 || item.buldNm || "건물명 없음";
             const address = item.건물주소 || item.도로명주소 || item.address1 || "-"; 
-            const key = `${buldNm}`; 
+            const key = `${buldNm}_${address}`; 
 
             if (!groupedMap.has(key)) {
                 groupedMap.set(key, {
@@ -385,7 +384,33 @@
         });
 
         globalGroups = Array.from(groupedMap.values());
-        renderData();
+        
+        // [핵심 변경] DB 좌표가 부정확할 수 있으므로, 정확한 주소를 바탕으로 카카오 API를 통해 좌표를 재정립합니다.
+        showLoadingMsg("📍 지도에 정확한 위치를 표시하는 중...");
+        Promise.all(globalGroups.map(group => {
+            return new Promise((resolve) => {
+                if (group.address === "-" || group.address === "주소 없음") { resolve(); return; } // 주소가 없으면 DB 좌표 그대로 사용
+                if (geocodeCache.has(group.address)) {
+                    const coords = geocodeCache.get(group.address);
+                    group.lat = coords.lat;
+                    group.lng = coords.lng;
+                    resolve(); return;
+                }
+                
+                geocoder.addressSearch(group.address, function(result, status) {
+                    if (status === kakao.maps.services.Status.OK) {
+                        group.lat = parseFloat(result[0].y); // 카카오의 초정밀 위도 덮어쓰기
+                        group.lng = parseFloat(result[0].x); // 카카오의 초정밀 경도 덮어쓰기
+                        geocodeCache.set(group.address, {lat: group.lat, lng: group.lng});
+                    }
+                    // 카카오 검색 실패 시 DB에 있던 원본 좌표(group.lat, group.lng)를 유지함
+                    resolve();
+                });
+            });
+        })).then(() => {
+            hideLoadingMsg();
+            renderData();
+        });
     }
 
     function renderData() {
@@ -425,7 +450,7 @@
             map.setLevel(4); 
             map.panTo(new kakao.maps.LatLng(globalGroups[0].lat, globalGroups[0].lng));
         } else if (validMarkerCount > 1) {
-            map.setBounds(bounds);
+            map.setBounds(bounds); // 검색된 마커들이 모두 보이도록 지도 줌아웃
         } 
     }
 
