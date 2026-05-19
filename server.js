@@ -5,39 +5,34 @@ const path = require('path');
 
 const app = express();
 app.use(cors()); // 외부 웹/앱에서 접속 허용
-
-// index1.html을 정상적으로 띄우기 위한 정적 파일 제공 설정 추가
-app.use(express.static(__dirname)); 
+app.use(express.static(__dirname)); // HTML 파일 제공
 
 // 1. 데이터베이스 연결 설정 (Supabase 클라우드 데이터베이스)
 const pool = new Pool({
-    // Supabase의 Pooler 연결 주소를 사용합니다.
     connectionString: "postgresql://postgres.oiazhplvilthpanwceob:p2XEnK5UMVDjmk25@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres",
-    ssl: {
-        rejectUnauthorized: false // 외부 클라우드 접속을 위한 SSL 설정
-    }
+    ssl: { rejectUnauthorized: false }
 });
 
-// 2. 승강기 검색 API 만들기 (건물명으로 검색)
+// 2. 승강기 검색 API 만들기 (건물명 + 건물주소 통합 검색)
 app.get('/api/elevators', async (req, res) => {
     const keyword = req.query.keyword;
     
     if (!keyword) {
-        return res.status(400).send("검색할 건물명을 입력해주세요.");
+        return res.status(400).send("검색어를 입력해주세요.");
     }
 
     try {
-        // [유지] A.* 를 통해 승강기의 모든 제원(종류, 상태, 하중, 설치일 등)을 가져옵니다.
+        // [핵심 변경] A.건물명 뿐만 아니라 A.건물주소 컬럼도 동시에 검색합니다!
         const sql = `
             SELECT A.*, B.위도, B.경도 
             FROM elevators_raw A
             LEFT JOIN coords_raw B ON A.건물명 = B.건물명
-            WHERE A.건물명 LIKE $1
+            WHERE A.건물명 LIKE $1 
+               OR A.건물주소 LIKE $1
             LIMIT 50
         `;
         const result = await pool.query(sql, [`%${keyword}%`]);
         
-        // 검색 결과를 웹브라우저/스마트폰으로 발송
         res.json(result.rows);
     } catch (error) {
         console.error("DB 검색 에러:", error);
@@ -45,18 +40,15 @@ app.get('/api/elevators', async (req, res) => {
     }
 });
 
-// 3. 사용자의 바탕화면에 있는 index1.html 파일을 읽어서 브라우저에 안전하게 배달합니다.
+// 3. 메인 HTML 응답
 app.get('/', (req, res) => {
-    // 서버와 같은 폴더에 있는 index1.html을 바로 브라우저에 배달합니다.
     res.sendFile(path.join(__dirname, 'index1.html')); 
 });
 
-// 4. 통신 서버 켜기 (Render 클라우드 환경에 맞게 자동 포트 할당 적용)
-// 💡 클라우드 서버는 3000번을 강제하면 에러가 날 수 있어 process.env.PORT를 우선 사용합니다.
+// 4. 통신 서버 켜기
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-    console.log(`🚀 승강기 API 서버가 클라우드 DB(Supabase) 모드로 ${port}번 포트에서 가동을 시작했습니다!`);
+    console.log(`🚀 승강기 API 서버가 ${port}번 포트에서 가동을 시작했습니다!`);
 });
 
-// 클라우드 환경에서 이 앱을 실행할 수 있도록 내보냅니다.
 module.exports = app;
