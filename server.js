@@ -14,7 +14,7 @@ const pool = new Pool({
 
 app.get('/api/elevators', async (req, res) => {
     const keyword = req.query.keyword;
-    const sido = req.query.sido || ''; // [추가] 프론트엔드에서 보낸 시/도 정보 받기
+    const sido = req.query.sido || '';
     
     if (!keyword) {
         return res.status(400).send("검색어를 입력해주세요.");
@@ -24,16 +24,18 @@ app.get('/api/elevators', async (req, res) => {
         const queryNoSpace = keyword.replace(/\s+/g, '');
         const sidoNoSpace = sido === '전국' ? '' : sido.replace(/\s+/g, '');
         
-        // [변경점] 시/도(sido) 필터링이 추가된 다이내믹 쿼리
+        // [핵심 변경] COALESCE를 사용하여 DB에 좌표가 있으면 쓰고, 없으면 세종시청 기본좌표(36.48008, 127.28921)를 리턴합니다.
+        // 이렇게 하면 프론트엔드에서 카카오 API를 호출할 필요가 없어집니다!
         let sql = `
-            SELECT A.*, B.위도, B.경도 
+            SELECT A.*, 
+                   COALESCE(B.위도, 36.48008) as 위도, 
+                   COALESCE(B.경도, 127.28921) as 경도 
             FROM elevators_raw A
             LEFT JOIN coords_raw B ON A.건물명 = B.건물명
             WHERE (REPLACE(A.건물명, ' ', '') LIKE $1 OR REPLACE(A.건물주소, ' ', '') LIKE $1)
         `;
         let params = [`%${queryNoSpace}%`];
 
-        // 선택한 지역이 '전국'이 아닐 경우, 해당 지역(예: 세종) 주소만 가져오도록 차단벽 생성!
         if (sidoNoSpace) {
             sql += ` AND REPLACE(A.건물주소, ' ', '') LIKE $2 `;
             params.push(`${sidoNoSpace}%`);
@@ -55,7 +57,7 @@ app.get('/', (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-    console.log(`🚀 API 서버 가동 중 (포트: ${port})`);
+    console.log(`🚀 API 서버 가동 중 (포트: ${port}) - 초고속 DB 좌표 적용`);
 });
 
 module.exports = app;
