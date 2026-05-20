@@ -96,7 +96,9 @@
         </div>
         
         <div class="search-bar" id="searchBar">
+            <!-- 시/도 선택기 유지 -->
             <select id="sidoSelector" class="sido-select" onchange="document.getElementById('searchInput').focus()">
+                <option value="전국">전국</option>
                 <option value="세종" selected>세종</option>
                 <option value="서울">서울</option>
                 <option value="경기">경기</option>
@@ -189,12 +191,11 @@
 
     let currentAbortController = null; 
 
-    // 기존의 느린 클라우드 플레어 API는 더이상 사용하지 않습니다.
     const markerSvgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V1zm1.5 1v12h9V2h-9zM5.5 4h1v8h-1V4zm4 0h1v8h-1V4z"/></svg>`;
 
     function initMap() {
         const container = document.getElementById('map');
-        const options = { center: new kakao.maps.LatLng(36.1, 127.7), level: 13 };
+        const options = { center: new kakao.maps.LatLng(36.48008, 127.28921), level: 8 };
         map = new kakao.maps.Map(container, options);
         geocoder = new kakao.maps.services.Geocoder(); 
         places = new kakao.maps.services.Places(); 
@@ -210,7 +211,6 @@
             map.setLevel(level, {anchor: cluster.getCenter()});
         });
 
-        // 지도 클릭 시 좌표 -> 주소 변환 후 광역 검색 (기존 기능 100% 유지)
         kakao.maps.event.addListener(map, 'click', function(mouseEvent) { 
             closeBottomSheet(); 
             closeDropdown();
@@ -259,8 +259,8 @@
         allElevatorsData = [];
         globalGroups = [];
         clusterer.clear(); 
-        map.setCenter(new kakao.maps.LatLng(36.1, 127.7));
-        map.setLevel(13);
+        map.setCenter(new kakao.maps.LatLng(36.48008, 127.28921));
+        map.setLevel(8);
     }
 
     function moveToMyLocation() {
@@ -390,7 +390,7 @@
 
 
     // =========================================================
-    // ★ [모드 1] 상호/장소 (카카오 리스트업 -> 해당 건물 전체 탐색)
+    // ★ [모드 1] 상호/장소 카카오 리스트업
     // =========================================================
     function searchKakaoPlaces() {
         const query = document.getElementById('searchInput').value.trim();
@@ -404,7 +404,10 @@
         saveRecentSearch(sido, query);
         showLoadingMsg(`⏳ [${query}] 장소를 찾는 중입니다...`);
 
-        places.keywordSearch(`${sido} ${query}`, function(result, status) {
+        // 선택한 지역(sido)과 상호명(query)을 합쳐서 카카오에 질의
+        const searchKeyword = sido === '전국' ? query : `${sido} ${query}`;
+
+        places.keywordSearch(searchKeyword, function(result, status) {
             hideLoadingMsg();
             if (status === kakao.maps.services.Status.OK) {
                 renderPlaceList(result, query);
@@ -420,13 +423,21 @@
         const dropdown = document.getElementById('searchDropdown');
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택해주세요👇</div>`;
         
+        const searchAllDiv = document.createElement('div');
+        searchAllDiv.className = 'dropdown-item';
+        searchAllDiv.innerHTML = `<div class="item-text" onclick="executeBroadSearch('${keyword}')" style="color:#1e4e79; font-weight:bold; text-align:center;">🚀 '${keyword}' (으)로 DB 전체 검색하기</div>`;
+        dropdown.appendChild(searchAllDiv);
+
         placesResult.forEach(place => {
             const div = document.createElement('div');
             div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
             
+            // 검색 키워드 최적화: 주소가 있으면 우선 사용, 없으면 상호명 사용
+            let searchKeyword = displayAddr ? displayAddr : place.place_name;
+
             div.innerHTML = `
-                <div class="item-text" onmousedown="fetchExactElevator(event, '${place.place_name}', '${displayAddr}')" ontouchstart="fetchExactElevator(event, '${place.place_name}', '${displayAddr}')">
+                <div class="item-text" onmousedown="document.getElementById('searchInput').value='${place.place_name}'; fetchExactElevator(event, '${searchKeyword}')" ontouchstart="document.getElementById('searchInput').value='${place.place_name}'; fetchExactElevator(event, '${searchKeyword}')">
                     <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
                     <span style="font-size:11px; color:#666;">📍 ${displayAddr}</span>
                 </div>
@@ -436,8 +447,8 @@
         dropdown.style.display = 'block';
     }
 
-    // ★ 자체 DB 통신으로 완벽 교체된 핀포인트 검색
-    async function fetchExactElevator(event, placeName, address) {
+    // 핀포인트 통신
+    async function fetchExactElevator(event, targetKeyword) {
         if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) { event.preventDefault(); event.stopPropagation(); }
         
@@ -446,32 +457,25 @@
         currentAbortController = new AbortController();
         const signal = currentAbortController.signal;
 
-        showLoadingMsg(`⏳ [${placeName}] 승강기 정보 조회 중...`);
-        lastQuery = placeName; 
+        showLoadingMsg(`⏳ 승강기 정보 실시간 조회 중...`);
+        const sido = document.getElementById('sidoSelector').value; 
+        
+        // 추출된 주소(targetKeyword)가 너무 길면 뒤의 2단어(핵심 주소)만 사용합니다.
+        let refinedKeyword = targetKeyword;
+        if (refinedKeyword.split(' ').length >= 3) {
+            let words = refinedKeyword.split(' ');
+            refinedKeyword = words[words.length - 2] + ' ' + words[words.length - 1];
+        }
+
+        lastQuery = refinedKeyword; 
         allElevatorsData = [];
         
         try {
-            // 카카오 주소에서 정확도 높은 키워드(도로명+지번) 추출
-            let targetKeyword = placeName;
-            if (address) {
-                let words = address.trim().split(/\s+/);
-                if (words.length >= 2) {
-                    targetKeyword = words[words.length - 2] + ' ' + words[words.length - 1];
-                }
-            }
-
-            // 진호님의 초고속 DB로 찌르기 (캐시방지 적용)
-            let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(targetKeyword)}&t=${Date.now()}`, { signal });
+            // [해결 2-1] 서버에 sido 파라미터를 추가 전송 (타 지역 섞임 방지)
+            let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(refinedKeyword)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal });
             if (!response.ok) throw new Error("서버 응답 오류");
             let data = await response.json();
 
-            // 만약 주소로 검색했는데 데이터가 없으면, 상호명으로 한 번 더 시도!
-            if (data.length === 0 && targetKeyword !== placeName) {
-                response = await fetch(`/api/elevators?keyword=${encodeURIComponent(placeName)}&t=${Date.now()}`, { signal });
-                if (response.ok) data = await response.json();
-            }
-
-            // 진호님의 기존 '승객용' 필터 로직 완벽 유지!
             allElevatorsData = data.filter(apiItem => {
                 const type = String(apiItem.승강기종류 || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
@@ -481,7 +485,7 @@
             currentAbortController = null;
 
             if (allElevatorsData.length === 0) {
-                alert(`해당 장소(${placeName})에 등록된 승객용 승강기가 없거나, 데이터가 일치하지 않습니다.\n데이터 누락이 의심되면 [도로명/지번] 모드로 검색해 보세요.`);
+                alert(`해당 장소에 등록된 승강기가 없거나, 다른 지역입니다.\n(왼쪽 위 시/도 선택이 올바른지 확인해 주세요)`);
                 return;
             }
 
@@ -501,10 +505,10 @@
 
 
     // =========================================================
-    // ★ [모드 2, 3] 건물명 / 주소 (자체 DB 초고속 광역 검색으로 교체)
+    // ★ [모드 2, 3] 건물명 / 주소 넓은 범위 검색
     // =========================================================
-    async function executeBroadSearch() {
-        const query = document.getElementById('searchInput').value.trim();
+    async function executeBroadSearch(overrideQuery) {
+        const query = overrideQuery || document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
         const searchType = document.getElementById('searchType').value; 
         
@@ -525,13 +529,12 @@
         showLoadingMsg("⏳ 실시간 데이터 검색 중...");
 
         try {
-            // 수백 줄의 쪼개기/페이징 코드를 단 한 줄의 고속 DB 통신으로 교체!
-            let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(query)}&t=${Date.now()}`, { signal });
+            // [해결 2-1] 서버에 sido 파라미터를 추가 전송
+            let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(query)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal });
             if (!response.ok) throw new Error("서버 응답 오류");
             
             let data = await response.json();
 
-            // 진호님의 기존 필터 로직 유지
             allElevatorsData = data.filter(apiItem => {
                 const type = String(apiItem.승강기종류 || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
@@ -541,7 +544,7 @@
             currentAbortController = null;
 
             if (allElevatorsData.length === 0) {
-                alert(`해당 조건으로 검색된 승객용 승강기가 없습니다.`);
+                alert(`[${sido}] 지역에서 해당 조건으로 검색된 승강기가 없습니다.`);
                 return;
             }
 
@@ -559,17 +562,25 @@
         }
     }
 
-
     // =========================================================
-    // ★ 공통 UI 랜더링 (마커 및 바텀시트) - 기존 로직 완벽 유지, DB 컬럼명만 매핑!
+    // ★ UI 랜더링 (마커 및 바텀시트)
     // =========================================================
     function buildGlobalGroups() {
         const groupedMap = new Map();
+        
+        // 검색창에 현재 떠있는 텍스트 (예: 스타벅스)
+        const uiKeyword = document.getElementById('searchInput').value.trim();
+        const searchType = document.getElementById('searchType').value;
 
         allElevatorsData.forEach(apiItem => {
-            // 공공데이터와 자체DB 컬럼명을 모두 지원하도록 매핑
-            const buldNm = apiItem.건물명 || apiItem.customBuldNm || apiItem.buldNm || apiItem.buld_nm || "건물명 없음";
+            let buldNm = apiItem.건물명 || apiItem.customBuldNm || apiItem.buldNm || apiItem.buld_nm || "건물명 없음";
             const address = apiItem.건물주소 || apiItem.도로명주소 || apiItem.address1 || apiItem.address || "-";
+            
+            // [해결 1] 상호명 검색 시 건물명 옆에 상호명 덧붙이기 로직!
+            if (searchType === 'place' && uiKeyword && !buldNm.includes(uiKeyword)) {
+                buldNm = `${buldNm} [${uiKeyword}]`;
+            }
+            
             const key = `${buldNm}_${address}`;
 
             if (!groupedMap.has(key)) {
@@ -623,10 +634,11 @@
 
         globalGroups = Array.from(groupedMap.values());
 
-        // 진호님의 기존 좌표 캐싱 및 카카오맵 변환 로직 (완벽 유지)
+        // [해결 2-2] DB에 있는 오염된 속초 좌표 무시! 카카오 지도로 진짜 주소의 초정밀 좌표를 다시 땁니다!
+        showLoadingMsg("📍 지도에 정확한 위치를 표시하는 중...");
         Promise.all(globalGroups.map(group => {
             return new Promise((resolve) => {
-                if (group.lat && group.lng) { resolve(); return; }
+                if (group.address === "-" || group.address === "주소 없음") { resolve(); return; } 
                 if (geocodeCache.has(group.address)) {
                     const coords = geocodeCache.get(group.address);
                     group.lat = coords.lat;
@@ -637,15 +649,13 @@
                     if (status === kakao.maps.services.Status.OK) {
                         group.lat = parseFloat(result[0].y);
                         group.lng = parseFloat(result[0].x);
-                    } else {
-                        group.lat = 36.4792 + (Math.random() - 0.5) * 0.05;
-                        group.lng = 127.2892 + (Math.random() - 0.5) * 0.05;
+                        geocodeCache.set(group.address, {lat: group.lat, lng: group.lng});
                     }
-                    geocodeCache.set(group.address, {lat: group.lat, lng: group.lng});
                     resolve();
                 });
             });
         })).then(() => {
+            hideLoadingMsg();
             renderData();
         });
     }
@@ -677,6 +687,8 @@
         let usedCoords = new Set(); 
 
         renderList.forEach(group => {
+            if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
+
             const isAllStopped = group.elevators.every(e => !e.isOperating);
             const content = document.createElement('div');
             content.className = isAllStopped ? 'custom-marker stopped' : 'custom-marker';
