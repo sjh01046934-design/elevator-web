@@ -1,496 +1,59 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>승강기 지도 - 초정밀 좌표 탐색</title>
+const express = require('express');
+const { Pool } = require('pg');
+const cors = require('cors');
+const path = require('path');
+
+const app = express();
+app.use(cors());
+app.use(express.static(__dirname));
+
+// 1. 데이터베이스 연결 설정 (Supabase 클라우드 데이터베이스)
+const pool = new Pool({
+    connectionString: "postgresql://postgres.oiazhplvilthpanwceob:p2XEnK5UMVDjmk25@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres",
+    ssl: { rejectUnauthorized: false }
+});
+
+// 2. 승강기 검색 API 만들기
+app.get('/api/elevators', async (req, res) => {
+    const keyword = req.query.keyword;
     
-    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=59f58919246c9ac3780496fc7e2c0d74&libraries=services,clusterer&autoload=false"></script>
-    
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background-color: #f0f2f5; display: flex; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
-        .app-container { width: 100%; max-width: 412px; height: 100vh; background-color: #e5e5e5; position: relative; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.15); }
-        #map { width: 100%; height: 100%; z-index: 1; }
-        
-        .page-header { text-align: center; margin-bottom: 12px; padding-top: 10px; }
-        .page-header h1 { font-size: 20px; color: #1e4e79; font-weight: 900; letter-spacing: -1px; margin-bottom: 2px; text-shadow: 1px 1px 2px rgba(255,255,255,0.8); }
-        .page-header p { font-size: 11px; color: #555; font-weight: 700; letter-spacing: -0.5px; }
-
-        .search-bar-wrapper { position: absolute; top: 0; left: 0; right: 0; padding: env(safe-area-inset-top, 0px) 16px 15px 16px; background: linear-gradient(to bottom, rgba(255,255,255,1) 75%, rgba(255,255,255,0)); z-index: 10; }
-        .search-bar { background: white; border-radius: 8px; display: flex; align-items: center; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border: 1px solid #dcdcdc; position: relative; }
-        .sido-select { border: none; border-right: 1px solid #ddd; background: transparent; font-size: 14px; font-weight: bold; color: #1e4e79; outline: none; padding-right: 8px; margin-right: 8px; cursor: pointer; }
-        .search-bar input { flex: 1; border: none; outline: none; font-size: 15px; font-weight: bold; color: #222; width: 100%; }
-        
-        .icon-clear { background: #ccc; color: white; border-radius: 50%; width: 18px; height: 18px; display: flex; justify-content: center; align-items: center; font-size: 10px; margin-right: 12px; cursor: pointer; font-weight: bold; }
-        .icon-search { color: #555; font-size: 20px; cursor: pointer; font-weight: bold; }
-
-        #searchLoadingMsg { display: none; margin-top: 8px; background: rgba(255,255,255,0.95); padding: 8px 12px; border-radius: 6px; box-shadow: 0 4px 10px rgba(0,0,0,0.15); border: 1px solid #1e4e79;}
-        .loading-container { display: flex; justify-content: space-between; align-items: center; }
-        .loading-text { font-size: 12px; font-weight: bold; color: #1e4e79; }
-        .cancel-btn { background: #d32f2f; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        
-        .search-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 6px; overflow-y: auto; max-height: 280px; display: none; border: 1px solid #e0e0e0; z-index: 20; }
-        .dropdown-header { padding: 12px 16px 6px; font-size: 12px; font-weight: bold; color: #777; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 8px 8px 0 0;}
-        .clear-all-btn { color: #aaa; cursor: pointer; font-weight: normal; }
-        .dropdown-item { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-        .dropdown-item:last-child { border-bottom: none; }
-        .dropdown-item:hover { background-color: #f8fafc; }
-        .item-text { font-size: 14px; font-weight: 500; color: #333; display: flex; flex-direction: column; gap: 4px; flex: 1; }
-        .item-delete { color: #ccc; padding: 4px 0 4px 12px; font-size: 14px; }
-        
-        .fab-container { position: absolute; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); right: 16px; display: flex; flex-direction: column; gap: 10px; z-index: 9; }
-        .fab-btn { background: white; border: 1px solid #dcdcdc; padding: 10px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.15); cursor: pointer; color: #1e4e79; transition: background 0.2s; text-align: center; }
-        .fab-btn:active { background: #f0f0f0; }
-        
-        .bottom-sheet { position: absolute; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; flex-direction: column; transform: translateY(100%); transition: transform 0.3s ease-out; background: white; border-radius: 16px 16px 0 0; box-shadow: 0 -4px 15px rgba(0,0,0,0.2); border: 1px solid #e0e0e0; max-height: 85vh; padding-bottom: env(safe-area-inset-bottom, 0px); }
-        .bottom-sheet.active { transform: translateY(0); }
-        .info-card { padding: 16px; display: flex; flex-direction: column; height: 100%; overflow: hidden; padding-bottom: 24px; }
-        .card-header { display: flex; align-items: center; margin-bottom: 12px; flex-shrink: 0; }
-        
-        .elevator-icon-box { width: 46px; height: 46px; display: flex; justify-content: center; align-items: center; margin-right: 12px; background: #f4f6f8; border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden; flex-shrink: 0;}
-        .status-title { font-size: 16px; font-weight: bold; color: #333; line-height: 1.3;}
-        .address-text { font-size: 13px; color: #666; margin-top: 2px; }
-
-        .action-links { display: flex; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
-        .action-btn { flex: 1; text-align: center; padding: 8px 0; border-radius: 6px; font-size: 13px; font-weight: bold; text-decoration: none; display: flex; justify-content: center; align-items: center; gap: 4px; border: 1px solid #e0e0e0; background: #f9f9f9; color: #333; transition: all 0.2s; }
-        
-        .section-title { font-size: 14px; font-weight: bold; color: #222; margin: 8px 0 6px 0; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; border-bottom: 2px solid #1e4e79; padding-bottom: 6px; }
-        .elevator-list-scroll { flex-grow: 1; overflow-y: auto; padding-right: 4px; margin-bottom: 10px; }
-        .elv-item-title { font-size: 13px; font-weight: bold; color: #444; margin-top: 10px; margin-bottom: 4px; display: flex; justify-content: space-between;}
-        
-        .data-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: center; border: 1px solid #d2d2d2; margin-bottom: 12px; background: white; table-layout: fixed; }
-        .data-table th, .data-table td { border: 1px solid #d2d2d2; padding: 6px 4px; word-break: keep-all; }
-        .data-table th { background-color: #f8fafc; color: #444; font-weight: bold; width: 20%; }
-        .data-table td { font-weight: 500; color: #111; width: 30%; }
-        
-        .custom-marker { background-color: #1e4e79; color: white; padding: 4px 7px; border-radius: 6px; font-size: 11.5px; font-weight: bold; box-shadow: 0 3px 6px rgba(0,0,0,0.3); position: relative; white-space: nowrap; cursor: pointer; bottom: 20px; display: flex; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.4); transition: transform 0.1s; }
-        .custom-marker::after { content: ''; position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%); border-width: 5px 5px 0; border-style: solid; border-color: #1e4e79 transparent; display: block; width: 0; }
-        .custom-marker.stopped { background-color: #d32f2f; border-color: #ffcccc;}
-        .custom-marker.stopped::after { border-color: #d32f2f transparent; }
-    </style>
-</head>
-<body>
-
-<div class="app-container">
-    <div id="map"></div>
-
-    <div class="fab-container">
-        <div class="fab-btn" onclick="resetMap()">첫화면</div>
-        <div class="fab-btn" onclick="moveToMyLocation()">내위치</div>
-    </div>
-
-    <div class="search-bar-wrapper">
-        <div class="page-header">
-            <h1>승강기 지도</h1>
-            <p>초고속 실시간 DB 연동 버전 (세종지사)</p>
-        </div>
-        
-        <div class="search-bar" id="searchBar">
-            <select id="sidoSelector" class="sido-select" style="display:none;">
-                <option value="전국" selected>전국</option>
-            </select>
-            
-            <select id="searchType" class="sido-select" style="margin-right:8px; color:#555;">
-                <option value="building" selected>건물/상호명</option>
-            </select>
-
-            <input type="text" id="searchInput" placeholder="건물명 또는 상호명 입력" autocomplete="off" 
-                   onfocus="handleInputFocus()" onclick="handleInputFocus()" onkeypress="handleKeyPress(event)">
-            <span class="icon-clear" onclick="fastClearSearch(event)">X</span>
-            <span class="icon-search" onclick="fastExecute(event)">🔍</span>
-            
-            <div class="search-dropdown" id="searchDropdown"></div>
-        </div>
-
-        <div id="searchLoadingMsg">
-            <div class="loading-container">
-                <span id="loadingText" class="loading-text">⏳ 실시간 데이터 검색 중입니다...</span>
-                <button onclick="cancelSearch()" class="cancel-btn">❌ 취소</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="bottom-sheet" id="bottomSheet">
-        <div class="info-card">
-            <div class="card-header">
-                <div class="elevator-icon-box">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1e4e79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
-                        <line x1="12" y1="22" x2="12" y2="2"></line>
-                        <polyline points="8 6 12 2 16 6"></polyline>
-                        <polyline points="8 18 12 22 16 18"></polyline>
-                    </svg>
-                </div>
-                <div>
-                    <div class="status-title" id="resBuildingName">건물명</div>
-                    <div class="address-text" id="resAddress">주소</div>
-                </div>
-            </div>
-
-            <div class="action-links">
-                <a id="btnRoadview" href="#" target="_blank" class="action-btn">🛣️ 로드뷰 보기</a>
-                <a id="btnDirections" href="#" target="_blank" class="action-btn">🧭 카카오 길찾기</a>
-            </div>
-            
-            <div class="section-title">
-                <span>승강기 목록 <span id="resTotalCount" style="color:#1e4e79;">(0대)</span></span>
-                <span style="color:#777; font-size:11px; font-weight:normal; cursor:pointer; background:#eee; padding:2px 8px; border-radius:10px;" onclick="closeBottomSheet()">닫기</span>
-            </div>
-            
-            <div id="elevatorListContainer" class="elevator-list-scroll"></div>
-        </div>
-    </div>
-</div>
-
-<script>
-    let map;
-    let clusterer; 
-    let places; 
-    let geocoder; 
-    
-    let allElevatorsData = []; 
-    let globalGroups = []; 
-    let geocodeCache = new Map(); 
-    let currentAbortController = null; 
-    const markerSvgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V1zm1.5 1v12h9V2h-9zM5.5 4h1v8h-1V4zm4 0h1v8h-1V4z"/></svg>`;
-
-    function initMap() {
-        const container = document.getElementById('map');
-        const options = { center: new kakao.maps.LatLng(36.48008, 127.28921), level: 8 };
-        map = new kakao.maps.Map(container, options);
-        
-        places = new kakao.maps.services.Places(); 
-        geocoder = new kakao.maps.services.Geocoder(); 
-
-        clusterer = new kakao.maps.MarkerClusterer({
-            map: map,
-            averageCenter: true,
-            minLevel: 7 
-        });
-
-        kakao.maps.event.addListener(clusterer, 'clusterclick', function(cluster) {
-            var level = map.getLevel() - 2;
-            map.setLevel(level, {anchor: cluster.getCenter()});
-        });
-
-        kakao.maps.event.addListener(map, 'click', function() { 
-            closeBottomSheet(); 
-            closeDropdown();
-        });
+    if (!keyword) {
+        return res.status(400).send("검색어를 입력해주세요.");
     }
 
-    function resetMap() {
-        cancelSearch();
-        document.getElementById('searchInput').value = '';
-        closeBottomSheet();
-        closeDropdown();
-        clusterer.clear(); 
-        map.setCenter(new kakao.maps.LatLng(36.48008, 127.28921));
-        map.setLevel(8);
-    }
-
-    function moveToMyLocation() {
-        if (navigator.geolocation) {
-            showLoadingMsg("📍 GPS로 내 위치를 찾는 중입니다...");
-            navigator.geolocation.getCurrentPosition(function(position) {
-                var lat = position.coords.latitude;
-                var lon = position.coords.longitude;
-                map.setCenter(new kakao.maps.LatLng(lat, lon));
-                map.setLevel(4); 
-                hideLoadingMsg();
-            }, function() {
-                alert("GPS 권한을 허용해주세요.");
-                hideLoadingMsg();
-            });
-        }
-    }
-
-    function showLoadingMsg(text) {
-        document.getElementById('loadingText').innerText = text;
-        document.getElementById('searchLoadingMsg').style.display = 'block';
-    }
-
-    function hideLoadingMsg() {
-        document.getElementById('searchLoadingMsg').style.display = 'none';
-    }
-
-    function cancelSearch() {
-        if (currentAbortController) {
-            currentAbortController.abort();
-            currentAbortController = null;
-            hideLoadingMsg();
-        }
-    }
-
-    function searchKakaoPlaces(query) {
-        places.keywordSearch(query, function(result, status) {
-            if (status === kakao.maps.services.Status.OK) {
-                renderPlaceList(result, query);
-            } else {
-                executeDatabaseSearch(query);
-            }
-        });
-    }
-
-    // [핵심 보완] 카카오 장소 목록에서 가장 검색에 유리한 주소(맨 뒤 2단어)를 뽑아 서버로 보냅니다.
-    function renderPlaceList(placesResult, keyword) {
-        const dropdown = document.getElementById('searchDropdown');
-        dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 아래 버튼을 누르세요👇</div>`;
+    try {
+        // [핵심 로직] 검색어의 모든 띄어쓰기를 없앱니다. (예: "보듬3로 92" -> "보듬3로92")
+        const queryNoSpace = keyword.replace(/\s+/g, '');
         
-        const searchAllDiv = document.createElement('div');
-        searchAllDiv.className = 'dropdown-item';
-        searchAllDiv.innerHTML = `<div class="item-text" onclick="executeDatabaseSearch('${keyword}')" style="color:#1e4e79; font-weight:bold; text-align:center;">🚀 '${keyword}' (으)로 DB 전체 검색하기</div>`;
-        dropdown.appendChild(searchAllDiv);
-
-        placesResult.forEach(place => {
-            const div = document.createElement('div');
-            div.className = 'dropdown-item';
-            const displayAddr = place.road_address_name || place.address_name;
-            
-            // 카카오 주소에서 검색에 유리한 '도로명/동이름 + 지번' 조합 추출
-            let searchKeyword = place.place_name;
-            if (displayAddr) {
-                let words = displayAddr.split(' ');
-                if (words.length >= 2) {
-                    searchKeyword = words[words.length - 2] + ' ' + words[words.length - 1];
-                }
-            }
-
-            div.innerHTML = `
-                <div class="item-text" onclick="document.getElementById('searchInput').value='${place.place_name}'; executeDatabaseSearch('${searchKeyword}');">
-                    <span style="font-weight:bold; color:#333;">🏢 ${place.place_name}</span>
-                    <span style="font-size:11px; color:#666;">📍 ${displayAddr}</span>
-                </div>
-            `;
-            dropdown.appendChild(div);
-        });
-        dropdown.style.display = 'block';
-    }
-
-    async function executeDatabaseSearch(keyword) {
-        closeDropdown();
-        closeBottomSheet();
-        cancelSearch(); 
+        // [핵심 로직] DB에 저장된 주소와 건물명도 띄어쓰기를 싹 없앤 후 비교합니다. 
+        // 띄어쓰기가 달라서 검색이 안 되는 고질적인 실무 문제를 완벽히 해결합니다.
+        const sql = `
+            SELECT A.*, B.위도, B.경도 
+            FROM elevators_raw A
+            LEFT JOIN coords_raw B ON A.건물명 = B.건물명
+            WHERE REPLACE(A.건물명, ' ', '') LIKE $1 
+               OR REPLACE(A.건물주소, ' ', '') LIKE $1
+            ORDER BY A.건물주소 ASC
+            LIMIT 1000
+        `;
         
-        currentAbortController = new AbortController();
-        const signal = currentAbortController.signal;
-
-        if (!keyword) return alert("검색어를 입력해주세요.");
-
-        showLoadingMsg(`⏳ DB에서 데이터를 검색 중입니다...`);
-        saveRecentSearch(document.getElementById('searchInput').value || keyword); 
-
-        try {
-            // [핵심 보완] 요청 끝에 t=${Date.now()} 를 붙여 캐시(과거 검색결과 재사용)를 완벽 차단!
-            const response = await fetch(`/api/elevators?keyword=${encodeURIComponent(keyword)}&t=${Date.now()}`, { signal });
-            if (!response.ok) throw new Error("서버 응답 오류");
-            
-            const data = await response.json();
-            
-            if (data.length === 0) {
-                hideLoadingMsg();
-                alert(`해당 위치 또는 이름으로 등록된 승강기가 없습니다.\n건물 주소나 건물의 정식 명칭으로 다시 검색해 보세요.`);
-                return;
-            }
-
-            allElevatorsData = data; 
-            buildGlobalGroups();
-
-        } catch (error) {
-            hideLoadingMsg();
-            if (error.name !== 'AbortError') {
-                console.error(error);
-                alert("서버 통신 에러가 발생했습니다.");
-            }
-        }
+        const result = await pool.query(sql, [`%${queryNoSpace}%`]);
+        res.json(result.rows);
+    } catch (error) {
+        console.error("DB 검색 에러:", error);
+        res.status(500).send("서버 에러가 발생했습니다.");
     }
+});
 
-    function fastExecute(event) {
-        if (event) event.preventDefault();
-        const query = document.getElementById('searchInput').value.trim();
-        if (query === '') return alert("검색어를 입력해주세요.");
-        searchKakaoPlaces(query);
-    }
+// 3. 사용자의 바탕화면에 있는 index1.html 파일을 읽어서 브라우저에 전달
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index1.html')); 
+});
 
-    function handleKeyPress(e) { if (e.key === 'Enter') fastExecute(e); }
-    function fastClearSearch() { document.getElementById('searchInput').value = ''; document.getElementById('searchInput').focus(); }
-    function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
+// 4. 통신 서버 켜기 
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+    console.log(`🚀 승강기 API 서버 가동 중 (포트: ${port}, 데이터 한도: 1000건)`);
+});
 
-    function handleInputFocus() {
-        const val = document.getElementById('searchInput').value.trim();
-        if (!val) renderRecentSearches();
-    }
-    
-    function saveRecentSearch(query) {
-        let recents = JSON.parse(localStorage.getItem('elevator_recent_fast') || '[]');
-        recents = recents.filter(r => r !== query); 
-        recents.unshift(query); 
-        if(recents.length > 5) recents.pop(); 
-        localStorage.setItem('elevator_recent_fast', JSON.stringify(recents));
-    }
-
-    function renderRecentSearches() {
-        const dropdown = document.getElementById('searchDropdown');
-        let recents = JSON.parse(localStorage.getItem('elevator_recent_fast') || '[]');
-        dropdown.innerHTML = '';
-        if (recents.length === 0) { dropdown.style.display = 'none'; return; }
-        
-        dropdown.innerHTML = `<div class="dropdown-header">최근 검색어 <span class="clear-all-btn" onclick="clearAllRecent()">전체삭제</span></div>`;
-        recents.forEach(query => {
-            const div = document.createElement('div');
-            div.className = 'dropdown-item';
-            div.innerHTML = `
-                <div class="item-text" onclick="document.getElementById('searchInput').value='${query}'; searchKakaoPlaces('${query}')">
-                    <div style="font-weight:bold;">${query}</div>
-                </div>
-            `;
-            dropdown.appendChild(div);
-        });
-        dropdown.style.display = 'block';
-    }
-    function clearAllRecent() { localStorage.removeItem('elevator_recent_fast'); renderRecentSearches(); }
-
-    function buildGlobalGroups() {
-        const groupedMap = new Map();
-
-        allElevatorsData.forEach(item => {
-            const buldNm = item.건물명 || item.buldNm || "건물명 없음";
-            const address = item.건물주소 || item.도로명주소 || item.address1 || "-"; 
-            const key = `${buldNm}_${address}`; 
-
-            if (!groupedMap.has(key)) {
-                groupedMap.set(key, {
-                    buildingName: buldNm,
-                    address: address,
-                    lat: parseFloat(item.위도 || item.gpsLati || 0),
-                    lng: parseFloat(item.경도 || item.gpsLong || 0),
-                    elevators: []
-                });
-            }
-
-            const state = item.운행상태 || item.elvtrStts || "상태확인필요";
-            const isOperating = !(state.includes('정지') || state.includes('중지') || state.includes('불합격') || state.includes('폐기') || state.includes('휴지'));
-
-            groupedMap.get(key).elevators.push({
-                elevatorNo: item.승강기고유번호 || item.elevatorNo || "-",
-                type: item.승강기종류 || item.elvtrKindNm || "-",
-                speed: item.정격속도 || item.ratedSpeed || "-",
-                floors: item.운행층수 || item.shuttleSection || "-",
-                weight: item.적재하중 || item.liveLoad || "-",
-                capacity: item.최대정원 || item.personCnt || "-",
-                installPlace: item.설치위치 || item.installationPlace || "-",
-                state: state,
-                isOperating: isOperating
-            });
-        });
-
-        globalGroups = Array.from(groupedMap.values());
-        
-        showLoadingMsg("📍 지도에 정확한 위치를 표시하는 중...");
-        Promise.all(globalGroups.map(group => {
-            return new Promise((resolve) => {
-                if (group.address === "-" || group.address === "주소 없음") { resolve(); return; } 
-                if (geocodeCache.has(group.address)) {
-                    const coords = geocodeCache.get(group.address);
-                    group.lat = coords.lat;
-                    group.lng = coords.lng;
-                    resolve(); return;
-                }
-                
-                geocoder.addressSearch(group.address, function(result, status) {
-                    if (status === kakao.maps.services.Status.OK) {
-                        group.lat = parseFloat(result[0].y); 
-                        group.lng = parseFloat(result[0].x); 
-                        geocodeCache.set(group.address, {lat: group.lat, lng: group.lng});
-                    }
-                    resolve();
-                });
-            });
-        })).then(() => {
-            hideLoadingMsg();
-            renderData();
-        });
-    }
-
-    function renderData() {
-        clusterer.clear(); 
-        let newOverlays = [];
-        let bounds = new kakao.maps.LatLngBounds();
-        let validMarkerCount = 0;
-
-        globalGroups.forEach(group => {
-            if(group.lat === 0 || group.lng === 0) return; 
-
-            const isAllStopped = group.elevators.every(e => !e.isOperating);
-            const content = document.createElement('div');
-            content.className = isAllStopped ? 'custom-marker stopped' : 'custom-marker';
-            content.innerHTML = markerSvgIcon + `<span>${group.buildingName} (${group.elevators.length}대)</span>`;
-            
-            content.onclick = function(event) { 
-                if (event) event.stopPropagation();
-                openBottomSheet(group); 
-            };
-
-            const position = new kakao.maps.LatLng(group.lat, group.lng);
-            newOverlays.push(new kakao.maps.CustomOverlay({
-                position: position, 
-                content: content,
-                yAnchor: 1,
-                clickable: true 
-            }));
-            
-            bounds.extend(position);
-            validMarkerCount++;
-        });
-        
-        clusterer.addMarkers(newOverlays);
-        
-        if (validMarkerCount === 1) {
-            map.setLevel(4); 
-            map.panTo(new kakao.maps.LatLng(globalGroups[0].lat, globalGroups[0].lng));
-        } else if (validMarkerCount > 1) {
-            map.setBounds(bounds); 
-        } 
-    }
-
-    function openBottomSheet(groupData) {
-        document.getElementById('resBuildingName').innerText = groupData.buildingName;
-        document.getElementById('resAddress').innerText = groupData.address !== "-" ? groupData.address : "주소 정보 확인 필요";
-        document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
-
-        document.getElementById('btnRoadview').href = `https://map.kakao.com/link/roadview/${groupData.lat},${groupData.lng}`;
-        document.getElementById('btnDirections').href = `https://map.kakao.com/link/to/${encodeURIComponent(groupData.buildingName)},${groupData.lat},${groupData.lng}`;
-
-        const listContainer = document.getElementById('elevatorListContainer');
-        listContainer.innerHTML = ''; 
-
-        groupData.elevators.forEach((elv, index) => {
-            const stateColor = elv.isOperating ? "#1e4e79" : "#d32f2f";
-            const tableHtml = `
-                <div class="elv-item-title">
-                    <span>#${index + 1} 호기 <span style="font-weight:normal; color:#777;">(${elv.elevatorNo})</span></span>
-                    <span style="color:${stateColor}; font-size:12px; font-weight:900;">[${elv.state}]</span>
-                </div>
-                <table class="data-table">
-                    <tr><th>승강기종류</th><td style="font-weight:bold;">${elv.type}</td><th>운행층수</th><td>${elv.floors}</td></tr>
-                    <tr><th>정격속도</th><td>${elv.speed}</td><th>적재하중</th><td>${elv.weight}</td></tr>
-                    <tr>
-                        <th>최대정원</th><td style="font-weight:bold; color:#1e4e79; background:#f8fafc;">${elv.capacity}</td>
-                        <th>설치위치</th><td style="font-size:11px; text-align:center;">${elv.installPlace}</td>
-                    </tr>
-                </table>
-            `;
-            listContainer.innerHTML += tableHtml;
-        });
-
-        document.getElementById('bottomSheet').classList.add('active');
-        map.panTo(new kakao.maps.LatLng(groupData.lat - 0.0015, groupData.lng));
-    }
-
-    function closeBottomSheet() { document.getElementById('bottomSheet').classList.remove('active'); }
-
-    window.onload = function() { kakao.maps.load(function() { initMap(); }); };
-</script>
-</body>
-</html>
+module.exports = app;
