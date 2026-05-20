@@ -702,30 +702,8 @@
         });
 
         globalGroups = Array.from(groupedMap.values());
-
-        showLoadingMsg("📍 지도에 정확한 위치를 표시하는 중...");
-        Promise.all(globalGroups.map(group => {
-            return new Promise((resolve) => {
-                if (group.address === "-" || group.address === "주소 없음") { resolve(); return; } 
-                if (geocodeCache.has(group.address)) {
-                    const coords = geocodeCache.get(group.address);
-                    group.lat = coords.lat;
-                    group.lng = coords.lng;
-                    resolve(); return;
-                }
-                geocoder.addressSearch(group.address, function(result, status) {
-                    if (status === kakao.maps.services.Status.OK) {
-                        group.lat = parseFloat(result[0].y);
-                        group.lng = parseFloat(result[0].x);
-                        geocodeCache.set(group.address, {lat: group.lat, lng: group.lng});
-                    }
-                    resolve();
-                });
-            });
-        })).then(() => {
-            hideLoadingMsg();
             renderData();
-        });
+        
     }
 
     function renderData() {
