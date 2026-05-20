@@ -96,7 +96,6 @@
         </div>
         
         <div class="search-bar" id="searchBar">
-            <!-- 시/도 선택기 유지 -->
             <select id="sidoSelector" class="sido-select" onchange="document.getElementById('searchInput').focus()">
                 <option value="전국">전국</option>
                 <option value="세종" selected>세종</option>
@@ -390,7 +389,7 @@
 
 
     // =========================================================
-    // ★ [모드 1] 상호/장소 카카오 리스트업
+    // ★ [모드 1] 상호/장소 카카오 리스트업 & 일괄 주소 검색
     // =========================================================
     function searchKakaoPlaces() {
         const query = document.getElementById('searchInput').value.trim();
@@ -404,7 +403,6 @@
         saveRecentSearch(sido, query);
         showLoadingMsg(`⏳ [${query}] 장소를 찾는 중입니다...`);
 
-        // 선택한 지역(sido)과 상호명(query)을 합쳐서 카카오에 질의
         const searchKeyword = sido === '전국' ? query : `${sido} ${query}`;
 
         places.keywordSearch(searchKeyword, function(result, status) {
@@ -421,11 +419,26 @@
 
     function renderPlaceList(placesResult, keyword) {
         const dropdown = document.getElementById('searchDropdown');
-        dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택해주세요👇</div>`;
+        dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 전체를 검색하세요👇</div>`;
         
+        // 카카오가 찾은 주소들을 싹 모아서 배열로 만듭니다 (핵심 마법)
+        let addressList = [];
+        placesResult.forEach(place => {
+            const displayAddr = place.road_address_name || place.address_name;
+            if (displayAddr) {
+                let words = displayAddr.split(' ');
+                if (words.length >= 2) addressList.push(words[words.length - 2] + ' ' + words[words.length - 1]);
+            }
+        });
+        // 중복 주소 제거
+        addressList = [...new Set(addressList)];
+        // 안전하게 문자열로 변환 (html 삽입용)
+        const addressStr = JSON.stringify(addressList).replace(/"/g, '&quot;');
+
         const searchAllDiv = document.createElement('div');
         searchAllDiv.className = 'dropdown-item';
-        searchAllDiv.innerHTML = `<div class="item-text" onclick="executeBroadSearch('${keyword}')" style="color:#1e4e79; font-weight:bold; text-align:center;">🚀 '${keyword}' (으)로 DB 전체 검색하기</div>`;
+        // [해결포인트] 단순히 DB를 검색하는게 아니라, 카카오가 찾은 주소 꾸러미를 전부 검색하도록 변경!
+        searchAllDiv.innerHTML = `<div class="item-text" onclick="executeMultiAddressSearch(${addressStr}, '${keyword}')" style="color:#1e4e79; font-weight:bold; text-align:center;">🚀 검색된 '${keyword}' 전체 다 표시하기</div>`;
         dropdown.appendChild(searchAllDiv);
 
         placesResult.forEach(place => {
@@ -433,7 +446,6 @@
             div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
             
-            // 검색 키워드 최적화: 주소가 있으면 우선 사용, 없으면 상호명 사용
             let searchKeyword = displayAddr ? displayAddr : place.place_name;
 
             div.innerHTML = `
@@ -447,7 +459,71 @@
         dropdown.style.display = 'block';
     }
 
-    // 핀포인트 통신
+    // ★ 다중 주소 동시 검색 (스타벅스 등 프랜차이즈 전체 검색용)
+    async function executeMultiAddressSearch(addresses, placeName) {
+        closeDropdown();
+        closeBottomSheet();
+        cancelSearch(); 
+        currentAbortController = new AbortController();
+        const signal = currentAbortController.signal;
+
+        showLoadingMsg(`⏳ [${placeName}] 여러 지점을 동시에 가져오는 중...`);
+        const sido = document.getElementById('sidoSelector').value; 
+        
+        lastQuery = placeName; 
+        allElevatorsData = [];
+        
+        try {
+            // 카카오가 넘겨준 주소들을 동시에 DB에 찌릅니다 (Render 서버라 순식간에 처리됨)
+            const fetchPromises = addresses.map(addr => 
+                fetch(`/api/elevators?keyword=${encodeURIComponent(addr)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal })
+                .then(res => res.ok ? res.json() : [])
+                .catch(e => [])
+            );
+
+            const results = await Promise.all(fetchPromises);
+            
+            // 모든 결과 합치고 중복 제거
+            const uniqueMap = new Map();
+            results.flat().forEach(apiItem => {
+                const elvNo = apiItem.승강기고유번호 || apiItem.elevatorNo || apiItem.elevator_no;
+                if (elvNo && !uniqueMap.has(elvNo)) {
+                    // 지도 핀에 프랜차이즈 이름 합성 (예: 해피라움상가 [스타벅스])
+                    if (!apiItem.customBuldNm) {
+                        apiItem.customBuldNm = `${apiItem.건물명 || apiItem.buldNm || "건물명 없음"} [${placeName}]`;
+                    }
+                    uniqueMap.set(elvNo, apiItem);
+                }
+            });
+
+            let data = Array.from(uniqueMap.values());
+
+            allElevatorsData = data.filter(apiItem => {
+                const type = String(apiItem.승강기종류 || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
+                return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
+            });
+
+            hideLoadingMsg();
+            currentAbortController = null;
+
+            if (allElevatorsData.length === 0) {
+                alert(`해당 조건으로 등록된 승객용 승강기를 찾을 수 없습니다.`);
+                return;
+            }
+
+            buildGlobalGroups();
+
+        } catch (error) {
+            currentAbortController = null;
+            if (error.name !== 'AbortError') {
+                console.error(error);
+                hideLoadingMsg();
+                alert("서버 통신 에러가 발생했습니다.");
+            }
+        }
+    }
+
+    // 핀포인트 단일 통신
     async function fetchExactElevator(event, targetKeyword) {
         if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) { event.preventDefault(); event.stopPropagation(); }
@@ -460,7 +536,6 @@
         showLoadingMsg(`⏳ 승강기 정보 실시간 조회 중...`);
         const sido = document.getElementById('sidoSelector').value; 
         
-        // 추출된 주소(targetKeyword)가 너무 길면 뒤의 2단어(핵심 주소)만 사용합니다.
         let refinedKeyword = targetKeyword;
         if (refinedKeyword.split(' ').length >= 3) {
             let words = refinedKeyword.split(' ');
@@ -471,7 +546,6 @@
         allElevatorsData = [];
         
         try {
-            // [해결 2-1] 서버에 sido 파라미터를 추가 전송 (타 지역 섞임 방지)
             let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(refinedKeyword)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal });
             if (!response.ok) throw new Error("서버 응답 오류");
             let data = await response.json();
@@ -529,7 +603,6 @@
         showLoadingMsg("⏳ 실시간 데이터 검색 중...");
 
         try {
-            // [해결 2-1] 서버에 sido 파라미터를 추가 전송
             let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(query)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal });
             if (!response.ok) throw new Error("서버 응답 오류");
             
@@ -568,16 +641,15 @@
     function buildGlobalGroups() {
         const groupedMap = new Map();
         
-        // 검색창에 현재 떠있는 텍스트 (예: 스타벅스)
         const uiKeyword = document.getElementById('searchInput').value.trim();
         const searchType = document.getElementById('searchType').value;
 
         allElevatorsData.forEach(apiItem => {
-            let buldNm = apiItem.건물명 || apiItem.customBuldNm || apiItem.buldNm || apiItem.buld_nm || "건물명 없음";
+            let buldNm = apiItem.customBuldNm || apiItem.건물명 || apiItem.buldNm || apiItem.buld_nm || "건물명 없음";
             const address = apiItem.건물주소 || apiItem.도로명주소 || apiItem.address1 || apiItem.address || "-";
             
-            // [해결 1] 상호명 검색 시 건물명 옆에 상호명 덧붙이기 로직!
-            if (searchType === 'place' && uiKeyword && !buldNm.includes(uiKeyword)) {
+            // 상호명 검색 시 건물명 옆에 상호명 덧붙이기 (수동 입력 시)
+            if (searchType === 'place' && uiKeyword && !apiItem.customBuldNm && !buldNm.includes(uiKeyword)) {
                 buldNm = `${buldNm} [${uiKeyword}]`;
             }
             
@@ -634,7 +706,6 @@
 
         globalGroups = Array.from(groupedMap.values());
 
-        // [해결 2-2] DB에 있는 오염된 속초 좌표 무시! 카카오 지도로 진짜 주소의 초정밀 좌표를 다시 땁니다!
         showLoadingMsg("📍 지도에 정확한 위치를 표시하는 중...");
         Promise.all(globalGroups.map(group => {
             return new Promise((resolve) => {
