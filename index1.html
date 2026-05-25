@@ -91,8 +91,8 @@
 
     <div class="search-bar-wrapper">
         <div class="page-header">
-            <h1>승강기 지도</h1>
-            <p>승강기 설치유무검색서비스 (초고속 DB 연동)</p>
+            <h1>EL-MAP</h1>
+            <p>스마트 승강기 안전 점검 서비스</p>
         </div>
         
         <div class="search-bar" id="searchBar">
@@ -125,6 +125,7 @@
 
             <input type="text" id="searchInput" placeholder="검색어 입력" autocomplete="off" 
                    onfocus="handleInputFocus()" onclick="handleInputFocus()" onkeypress="handleKeyPress(event)">
+            
             <span class="icon-clear" onclick="fastClearSearch(event)">X</span>
             <span class="icon-search" onclick="fastExecute(event)">🔍</span>
             
@@ -184,9 +185,20 @@
     let globalGroups = []; 
     let geocodeCache = new Map(); 
 
-    // [수정2] 불필요한 모바일 터치 감지 변수 및 이벤트리스너 완전 삭제 (이제 필요 없습니다)
-
     let currentAbortController = null; 
+
+    // [핵심 추가] UI의 '전남'을 DB의 '전라남도'로 매핑해주는 스마트 함수
+    function getDbSido(sido) {
+        const map = {
+            "충북": "충청북도",
+            "충남": "충청남도",
+            "전북": "전라북도",
+            "전남": "전라남도",
+            "경북": "경상북도",
+            "경남": "경상남도"
+        };
+        return map[sido] || sido;
+    }
 
     const markerSvgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V1zm1.5 1v12h9V2h-9zM5.5 4h1v8h-1V4zm4 0h1v8h-1V4z"/></svg>`;
 
@@ -295,7 +307,7 @@
         }
     }
 
-    // [수정2] 모바일 스크롤 충돌을 막기 위해 강제 터치 종료 구문 삭제
+    // [수정] 모바일 터치 오작동을 제거하기 위해 파라미터 간소화
     function fastSearch(event, sido, query, type) {
         if (event) { event.preventDefault(); event.stopPropagation(); }
         
@@ -357,7 +369,7 @@
             if(item.type === 'place') typeLabel = '상호/장소';
             else if(item.type === 'building') typeLabel = '건물/아파트';
 
-            // [수정2] onclick으로 통합하여 스크롤과 클릭이 자연스럽게 구분되도록 수정
+            // [수정] 모바일 스크롤 보장을 위해 onclick 이벤트로 처리
             div.innerHTML = `
                 <div class="item-text" onclick="fastSearch(event, '${item.sido}', '${item.query}', '${item.type}')">
                     <div><span class="item-tag">${item.sido} | ${typeLabel}</span></div>
@@ -417,13 +429,12 @@
         const dropdown = document.getElementById('searchDropdown');
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 전체를 검색하세요👇</div>`;
         
-        // [수정1] 카카오가 찾은 주소들을 싹 모아서 배열로 만듭니다 (목포시 등의 시/군/구 보존)
+        // [수정] 목포시 누락 방지: 첫번째 시/도만 제외하고 전체 주소를 살려서 넘깁니다. (ex: 목포시 옥암동 123)
         let addressList = [];
         placesResult.forEach(place => {
             const displayAddr = place.road_address_name || place.address_name;
             if (displayAddr) {
                 let words = displayAddr.split(' ');
-                // 첫번째 단어(시/도명)만 제외하고, "목포시 옥암동 123" 형태로 검색어 추출
                 if (words.length > 1) {
                     addressList.push(words.slice(1).join(' '));
                 } else {
@@ -432,7 +443,6 @@
             }
         });
         
-        // 중복 주소 제거
         addressList = [...new Set(addressList)];
         const addressStr = JSON.stringify(addressList).replace(/"/g, '&quot;');
 
@@ -446,14 +456,14 @@
             div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
             
-            // [수정1] 개별 장소 터치 시에도 시/도만 제외한 주소를 DB로 넘겨 목포시 누락을 방지합니다.
+            // [수정] 개별 클릭 시에도 시/군/구(목포시)를 보존하여 넘깁니다.
             let searchKeyword = displayAddr;
             if (displayAddr) {
                 let words = displayAddr.split(' ');
                 searchKeyword = words.length > 1 ? words.slice(1).join(' ') : displayAddr;
             }
 
-            // [수정2] ontouchstart를 제거하고 onclick으로 통일 (스크롤 오작동 방지)
+            // [수정] onclick 처리하여 스크롤 작동 보장
             div.innerHTML = `
                 <div class="item-text" onclick="document.getElementById('searchInput').value='${place.place_name}'; fetchExactElevator(event, '${searchKeyword}')">
                     <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
@@ -476,12 +486,15 @@
         showLoadingMsg(`⏳ [${placeName}] 여러 지점을 동시에 가져오는 중...`);
         const sido = document.getElementById('sidoSelector').value; 
         
+        // [핵심 추가] DB가 알아듣는 Sido('전라남도')로 자동 변환
+        const dbSido = getDbSido(sido);
+        
         lastQuery = placeName; 
         allElevatorsData = [];
         
         try {
             const fetchPromises = addresses.map(addr => 
-                fetch(`/api/elevators?keyword=${encodeURIComponent(addr)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal })
+                fetch(`/api/elevators?keyword=${encodeURIComponent(addr)}&sido=${encodeURIComponent(dbSido)}&t=${Date.now()}`, { signal })
                 .then(res => res.ok ? res.json() : [])
                 .catch(e => [])
             );
@@ -528,7 +541,6 @@
 
     // 핀포인트 단일 통신
     async function fetchExactElevator(event, targetKeyword) {
-        // [수정2] 스크롤 방해 코드 삭제
         if (event) { event.preventDefault(); event.stopPropagation(); }
         
         closeDropdown();
@@ -539,14 +551,17 @@
         showLoadingMsg(`⏳ 승강기 정보 실시간 조회 중...`);
         const sido = document.getElementById('sidoSelector').value; 
         
-        // [수정1] 이미 똑똑하게 정제된 targetKeyword("목포시 상동 123")가 바로 넘어오므로 그대로 사용합니다.
+        // [핵심 추가] DB가 알아듣는 Sido('전라남도')로 자동 변환
+        const dbSido = getDbSido(sido);
+        
+        // [수정] targetKeyword("목포시 상동 123")가 이미 완벽하게 정제되어 넘어오므로 추가 가공 생략
         let refinedKeyword = targetKeyword;
 
         lastQuery = refinedKeyword; 
         allElevatorsData = [];
         
         try {
-            let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(refinedKeyword)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal });
+            let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(refinedKeyword)}&sido=${encodeURIComponent(dbSido)}&t=${Date.now()}`, { signal });
             if (!response.ok) throw new Error("서버 응답 오류");
             let data = await response.json();
 
@@ -595,6 +610,9 @@
 
         if (query === '') { alert("검색어를 입력해주세요."); return; }
 
+        // [핵심 추가] DB가 알아듣는 Sido('전라남도')로 자동 변환
+        const dbSido = getDbSido(sido);
+
         allElevatorsData = []; 
         lastQuery = query;
         lastSido = sido;
@@ -603,7 +621,7 @@
         showLoadingMsg("⏳ 실시간 데이터 검색 중...");
 
         try {
-            let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(query)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal });
+            let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(query)}&sido=${encodeURIComponent(dbSido)}&t=${Date.now()}`, { signal });
             if (!response.ok) throw new Error("서버 응답 오류");
             
             let data = await response.json();
