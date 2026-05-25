@@ -125,8 +125,8 @@
 
             <input type="text" id="searchInput" placeholder="검색어 입력" autocomplete="off" 
                    onfocus="handleInputFocus()" onclick="handleInputFocus()" onkeypress="handleKeyPress(event)">
-            <span class="icon-clear" onmousedown="fastClearSearch(event)" ontouchstart="fastClearSearch(event)">X</span>
-            <span class="icon-search" onmousedown="fastExecute(event)" ontouchstart="fastExecute(event)">🔍</span>
+            <span class="icon-clear" onclick="fastClearSearch(event)">X</span>
+            <span class="icon-search" onclick="fastExecute(event)">🔍</span>
             
             <div class="search-dropdown" id="searchDropdown"></div>
         </div>
@@ -184,9 +184,7 @@
     let globalGroups = []; 
     let geocodeCache = new Map(); 
 
-    let isTouchMoved = false;
-    document.addEventListener('touchstart', function() { isTouchMoved = false; }, {passive: true});
-    document.addEventListener('touchmove', function() { isTouchMoved = true; }, {passive: true});
+    // [수정2] 불필요한 모바일 터치 감지 변수 및 이벤트리스너 완전 삭제 (이제 필요 없습니다)
 
     let currentAbortController = null; 
 
@@ -297,8 +295,8 @@
         }
     }
 
+    // [수정2] 모바일 스크롤 충돌을 막기 위해 강제 터치 종료 구문 삭제
     function fastSearch(event, sido, query, type) {
-        if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) { event.preventDefault(); event.stopPropagation(); }
         
         document.getElementById('sidoSelector').value = sido;
@@ -312,7 +310,6 @@
     }
 
     function fastDelete(event, index) {
-        if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) { event.preventDefault(); event.stopPropagation(); }
         let recents = JSON.parse(localStorage.getItem('elevator_recent_searches') || '[]'); 
         recents.splice(index, 1); 
@@ -321,7 +318,6 @@
     }
 
     function fastExecute(event) {
-        if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) event.preventDefault();
         document.getElementById('searchDropdown').style.display = 'none';
         document.getElementById('searchInput').blur();
@@ -332,7 +328,6 @@
     }
 
     function fastClearSearch(event) {
-        if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) event.preventDefault();
         document.getElementById('searchInput').value = ''; 
         document.getElementById('searchInput').focus();
@@ -362,12 +357,13 @@
             if(item.type === 'place') typeLabel = '상호/장소';
             else if(item.type === 'building') typeLabel = '건물/아파트';
 
+            // [수정2] onclick으로 통합하여 스크롤과 클릭이 자연스럽게 구분되도록 수정
             div.innerHTML = `
-                <div class="item-text" onmousedown="fastSearch(event, '${item.sido}', '${item.query}', '${item.type}')" ontouchstart="fastSearch(event, '${item.sido}', '${item.query}', '${item.type}')">
+                <div class="item-text" onclick="fastSearch(event, '${item.sido}', '${item.query}', '${item.type}')">
                     <div><span class="item-tag">${item.sido} | ${typeLabel}</span></div>
                     <div style="font-weight:bold;">${item.query}</div>
                 </div>
-                <div class="item-delete" onmousedown="fastDelete(event, ${index})" ontouchstart="fastDelete(event, ${index})">✕</div>
+                <div class="item-delete" onclick="fastDelete(event, ${index})">✕</div>
             `;
             dropdown.appendChild(div);
         });
@@ -421,23 +417,27 @@
         const dropdown = document.getElementById('searchDropdown');
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 전체를 검색하세요👇</div>`;
         
-        // 카카오가 찾은 주소들을 싹 모아서 배열로 만듭니다 (핵심 마법)
+        // [수정1] 카카오가 찾은 주소들을 싹 모아서 배열로 만듭니다 (목포시 등의 시/군/구 보존)
         let addressList = [];
         placesResult.forEach(place => {
             const displayAddr = place.road_address_name || place.address_name;
             if (displayAddr) {
                 let words = displayAddr.split(' ');
-                if (words.length >= 2) addressList.push(words[words.length - 2] + ' ' + words[words.length - 1]);
+                // 첫번째 단어(시/도명)만 제외하고, "목포시 옥암동 123" 형태로 검색어 추출
+                if (words.length > 1) {
+                    addressList.push(words.slice(1).join(' '));
+                } else {
+                    addressList.push(displayAddr);
+                }
             }
         });
+        
         // 중복 주소 제거
         addressList = [...new Set(addressList)];
-        // 안전하게 문자열로 변환 (html 삽입용)
         const addressStr = JSON.stringify(addressList).replace(/"/g, '&quot;');
 
         const searchAllDiv = document.createElement('div');
         searchAllDiv.className = 'dropdown-item';
-        // [해결포인트] 단순히 DB를 검색하는게 아니라, 카카오가 찾은 주소 꾸러미를 전부 검색하도록 변경!
         searchAllDiv.innerHTML = `<div class="item-text" onclick="executeMultiAddressSearch(${addressStr}, '${keyword}')" style="color:#1e4e79; font-weight:bold; text-align:center;">🚀 검색된 '${keyword}' 전체 다 표시하기</div>`;
         dropdown.appendChild(searchAllDiv);
 
@@ -446,10 +446,16 @@
             div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
             
-            let searchKeyword = displayAddr ? displayAddr : place.place_name;
+            // [수정1] 개별 장소 터치 시에도 시/도만 제외한 주소를 DB로 넘겨 목포시 누락을 방지합니다.
+            let searchKeyword = displayAddr;
+            if (displayAddr) {
+                let words = displayAddr.split(' ');
+                searchKeyword = words.length > 1 ? words.slice(1).join(' ') : displayAddr;
+            }
 
+            // [수정2] ontouchstart를 제거하고 onclick으로 통일 (스크롤 오작동 방지)
             div.innerHTML = `
-                <div class="item-text" onmousedown="document.getElementById('searchInput').value='${place.place_name}'; fetchExactElevator(event, '${searchKeyword}')" ontouchstart="document.getElementById('searchInput').value='${place.place_name}'; fetchExactElevator(event, '${searchKeyword}')">
+                <div class="item-text" onclick="document.getElementById('searchInput').value='${place.place_name}'; fetchExactElevator(event, '${searchKeyword}')">
                     <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
                     <span style="font-size:11px; color:#666;">📍 ${displayAddr}</span>
                 </div>
@@ -474,7 +480,6 @@
         allElevatorsData = [];
         
         try {
-            // 카카오가 넘겨준 주소들을 동시에 DB에 찌릅니다 (Render 서버라 순식간에 처리됨)
             const fetchPromises = addresses.map(addr => 
                 fetch(`/api/elevators?keyword=${encodeURIComponent(addr)}&sido=${encodeURIComponent(sido)}&t=${Date.now()}`, { signal })
                 .then(res => res.ok ? res.json() : [])
@@ -483,12 +488,10 @@
 
             const results = await Promise.all(fetchPromises);
             
-            // 모든 결과 합치고 중복 제거
             const uniqueMap = new Map();
             results.flat().forEach(apiItem => {
                 const elvNo = apiItem.승강기고유번호 || apiItem.elevatorNo || apiItem.elevator_no;
                 if (elvNo && !uniqueMap.has(elvNo)) {
-                    // 지도 핀에 프랜차이즈 이름 합성 (예: 해피라움상가 [스타벅스])
                     if (!apiItem.customBuldNm) {
                         apiItem.customBuldNm = `${apiItem.건물명 || apiItem.buldNm || "건물명 없음"} [${placeName}]`;
                     }
@@ -525,7 +528,7 @@
 
     // 핀포인트 단일 통신
     async function fetchExactElevator(event, targetKeyword) {
-        if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
+        // [수정2] 스크롤 방해 코드 삭제
         if (event) { event.preventDefault(); event.stopPropagation(); }
         
         closeDropdown();
@@ -536,11 +539,8 @@
         showLoadingMsg(`⏳ 승강기 정보 실시간 조회 중...`);
         const sido = document.getElementById('sidoSelector').value; 
         
+        // [수정1] 이미 똑똑하게 정제된 targetKeyword("목포시 상동 123")가 바로 넘어오므로 그대로 사용합니다.
         let refinedKeyword = targetKeyword;
-        if (refinedKeyword.split(' ').length >= 3) {
-            let words = refinedKeyword.split(' ');
-            refinedKeyword = words[words.length - 2] + ' ' + words[words.length - 1];
-        }
 
         lastQuery = refinedKeyword; 
         allElevatorsData = [];
@@ -648,7 +648,6 @@
             let buldNm = apiItem.customBuldNm || apiItem.건물명 || apiItem.buldNm || apiItem.buld_nm || "건물명 없음";
             const address = apiItem.건물주소 || apiItem.도로명주소 || apiItem.address1 || apiItem.address || "-";
             
-            // 상호명 검색 시 건물명 옆에 상호명 덧붙이기 (수동 입력 시)
             if (searchType === 'place' && uiKeyword && !apiItem.customBuldNm && !buldNm.includes(uiKeyword)) {
                 buldNm = `${buldNm} [${uiKeyword}]`;
             }
