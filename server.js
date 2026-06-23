@@ -46,7 +46,7 @@ app.get('/api/elevators', async (req, res) => {
             try {
                 // 🔥 [대리님이 찾아낸 핵심 해결책 적용!] 
                 // 신버전 공공데이터 API 주소 (B553664 포함)로 교체 완료
-                const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorView?serviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+                const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewMserviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
                 
                 const response = await axios.get(apiUrl, { timeout: 5000 });
 
