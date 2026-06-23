@@ -61,7 +61,7 @@ app.get('/api/elevators', async (req, res) => {
                 if (items) {
                      const itemData = Array.isArray(items) ? items[0] : items;
                      // 로그에서 확인된 'elvtrStts' 필드를 우선적으로 가져오도록 수정 완료!
-                     currentStatus = itemData.elvtrSttsNm || itemData.elvtrStts || "상태알수없음"; 
+                     currentStatus = itemData.elvtrStts || itemData.elvtrSttsNm || "상태알수없음"; 
                 }
 
                 return { ...elevator, 실시간운행상태: currentStatus, elvtrStts: currentStatus };
