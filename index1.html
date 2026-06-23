@@ -187,7 +187,6 @@
 
     let currentAbortController = null; 
 
-    // [핵심 추가] UI의 '전남'을 DB의 '전라남도'로 매핑해주는 스마트 함수
     function getDbSido(sido) {
         const map = {
             "충북": "충청북도",
@@ -307,7 +306,6 @@
         }
     }
 
-    // [수정] 모바일 터치 오작동을 제거하기 위해 파라미터 간소화
     function fastSearch(event, sido, query, type) {
         if (event) { event.preventDefault(); event.stopPropagation(); }
         
@@ -369,7 +367,6 @@
             if(item.type === 'place') typeLabel = '상호/장소';
             else if(item.type === 'building') typeLabel = '건물/아파트';
 
-            // [수정] 모바일 스크롤 보장을 위해 onclick 이벤트로 처리
             div.innerHTML = `
                 <div class="item-text" onclick="fastSearch(event, '${item.sido}', '${item.query}', '${item.type}')">
                     <div><span class="item-tag">${item.sido} | ${typeLabel}</span></div>
@@ -394,7 +391,6 @@
     function clearAllRecent() { localStorage.removeItem('elevator_recent_searches'); renderRecentSearches(); }
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
-
 
     // =========================================================
     // ★ [모드 1] 상호/장소 카카오 리스트업 & 일괄 주소 검색
@@ -429,7 +425,6 @@
         const dropdown = document.getElementById('searchDropdown');
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 전체를 검색하세요👇</div>`;
         
-        // [수정] 목포시 누락 방지: 첫번째 시/도만 제외하고 전체 주소를 살려서 넘깁니다. (ex: 목포시 옥암동 123)
         let addressList = [];
         placesResult.forEach(place => {
             const displayAddr = place.road_address_name || place.address_name;
@@ -456,14 +451,12 @@
             div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
             
-            // [수정] 개별 클릭 시에도 시/군/구(목포시)를 보존하여 넘깁니다.
             let searchKeyword = displayAddr;
             if (displayAddr) {
                 let words = displayAddr.split(' ');
                 searchKeyword = words.length > 1 ? words.slice(1).join(' ') : displayAddr;
             }
 
-            // [수정] onclick 처리하여 스크롤 작동 보장
             div.innerHTML = `
                 <div class="item-text" onclick="document.getElementById('searchInput').value='${place.place_name}'; fetchExactElevator(event, '${searchKeyword}')">
                     <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
@@ -475,7 +468,6 @@
         dropdown.style.display = 'block';
     }
 
-    // ★ 다중 주소 동시 검색 (스타벅스 등 프랜차이즈 전체 검색용)
     async function executeMultiAddressSearch(addresses, placeName) {
         closeDropdown();
         closeBottomSheet();
@@ -486,7 +478,6 @@
         showLoadingMsg(`⏳ [${placeName}] 여러 지점을 동시에 가져오는 중...`);
         const sido = document.getElementById('sidoSelector').value; 
         
-        // [핵심 추가] DB가 알아듣는 Sido('전라남도')로 자동 변환
         const dbSido = getDbSido(sido);
         
         lastQuery = placeName; 
@@ -539,7 +530,6 @@
         }
     }
 
-    // 핀포인트 단일 통신
     async function fetchExactElevator(event, targetKeyword) {
         if (event) { event.preventDefault(); event.stopPropagation(); }
         
@@ -551,10 +541,7 @@
         showLoadingMsg(`⏳ 승강기 정보 실시간 조회 중...`);
         const sido = document.getElementById('sidoSelector').value; 
         
-        // [핵심 추가] DB가 알아듣는 Sido('전라남도')로 자동 변환
         const dbSido = getDbSido(sido);
-        
-        // [수정] targetKeyword("목포시 상동 123")가 이미 완벽하게 정제되어 넘어오므로 추가 가공 생략
         let refinedKeyword = targetKeyword;
 
         lastQuery = refinedKeyword; 
@@ -592,7 +579,6 @@
         }
     }
 
-
     // =========================================================
     // ★ [모드 2, 3] 건물명 / 주소 넓은 범위 검색
     // =========================================================
@@ -610,7 +596,6 @@
 
         if (query === '') { alert("검색어를 입력해주세요."); return; }
 
-        // [핵심 추가] DB가 알아듣는 Sido('전라남도')로 자동 변환
         const dbSido = getDbSido(sido);
 
         allElevatorsData = []; 
@@ -654,7 +639,7 @@
     }
 
     // =========================================================
-    // ★ UI 랜더링 (마커 및 바텀시트)
+    // ★ UI 랜더링 (마커 및 바텀시트 연동)
     // =========================================================
     function buildGlobalGroups() {
         const groupedMap = new Map();
@@ -682,7 +667,8 @@
                 });
             }
 
-            const stts = String(apiItem.운행상태 || apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
+            // 백엔드가 제공하는 '실시간운행상태' 변수를 최우선 판별 기준으로 삼습니다.
+            const stts = String(apiItem.실시간운행상태 || apiItem.운행상태 || apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지'));
             
             const rawType = String(apiItem.승강기종류 || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
@@ -777,10 +763,20 @@
         renderList.forEach(group => {
             if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
 
-            const isAllStopped = group.elevators.every(e => !e.isOperating);
+            // 건물 안의 멈춘 엘리베이터 개수 연산
+            const stoppedCount = group.elevators.filter(e => !e.isOperating).length;
+            const isAllStopped = group.elevators.length > 0 && stoppedCount === group.elevators.length;
+            
             const content = document.createElement('div');
             content.className = isAllStopped ? 'custom-marker stopped' : 'custom-marker';
-            content.innerHTML = markerSvgIcon + `<span>${group.buildingName} (${group.elevators.length}대)</span>`;
+            
+            // 1대라도 정지된 경우 마커 우측에 직관적인 빨간 배지 딱지 부착
+            let stopBadge = '';
+            if (stoppedCount > 0) {
+                stopBadge = `<span style="background: white; color: #d32f2f; padding: 2px 5px; border-radius: 4px; margin-left: 6px; font-size: 11px; font-weight: 900; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">운행정지 ${stoppedCount}대</span>`;
+            }
+
+            content.innerHTML = markerSvgIcon + `<span>${group.buildingName} (${group.elevators.length}대)</span>` + stopBadge;
             
             content.onclick = function(event) { 
                 if (event) event.stopPropagation();
