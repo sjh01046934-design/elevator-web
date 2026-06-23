@@ -766,7 +766,7 @@
             if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
 
             // 건물 안의 멈춘 엘리베이터 개수 연산
-            const stoppedCount = group.elevators.filter(e => !e.isOperating).length;
+            const stoppedCount = group.elevators.filter(e => e.state.includes('중지') || e.state.includes('불합격') || e.state.includes('고장')).length;
             const isAllStopped = group.elevators.length > 0 && stoppedCount === group.elevators.length;
             
             const content = document.createElement('div');
