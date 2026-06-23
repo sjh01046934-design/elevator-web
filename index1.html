@@ -668,7 +668,7 @@
             }
 
             // 백엔드가 제공하는 '실시간운행상태' 변수를 최우선 판별 기준으로 삼습니다.
-            const stts = String(apiItem.elvtrStts || apiItem.실시간운행상태 || apiItem.운행상태 || "상태불명").trim();
+            const stts = String(apiItem.elvtrStts || "상태불명").trim();
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지'));
             
             const rawType = String(apiItem.승강기종류 || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
@@ -702,9 +702,7 @@
     weight: finalWeight,
     capacity: finalCapacity,
     installPlace: String(apiItem.설치위치 || apiItem.installationPlace || apiItem.installation_place || "-").trim(),
-    
-    // [핵심 수정] 서버에서 보낸 '실시간운행상태'를 여기서 state에 확실하게 담습니다.
-    state: apiItem.실시간운행상태 || apiItem.운행상태 || "상태불명", 
+    state: stts, 
     isOperating: isOperating
 });
         });
