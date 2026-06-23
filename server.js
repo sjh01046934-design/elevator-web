@@ -7,7 +7,7 @@ const axios = require('axios');
 const app = express();
 app.use(cors()); 
 
-// ★ 대리님의 진짜 공공데이터포털(Decoding) 인증키를 넣어주세요.
+// 🔥 대리님이 직접 작동을 확인하신 실제 인증키 적용 완료
 const PUBLIC_API_KEY = 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d';
 
 // 1. 데이터베이스 연결 설정
@@ -44,9 +44,9 @@ app.get('/api/elevators', async (req, res) => {
             const safeElevatorNo = String(rawElevatorNo).trim().padStart(7, '0');
 
             try {
-                // 🔥 [대리님이 찾아낸 핵심 해결책 적용!] 
-                // 신버전 공공데이터 API 주소 (B553664 포함)로 교체 완료
-                const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewMserviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+                // 🔥 [대리님이 직접 검증하신 완벽한 API 주소 적용]
+                // getElevatorViewM 엔드포인트와 검증된 인증키를 사용하여 JSON 형식으로 호출합니다.
+                const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
                 
                 const response = await axios.get(apiUrl, { timeout: 5000 });
 
@@ -90,7 +90,7 @@ app.get('/', (req, res) => {
 });
 
 app.listen(3000, () => {
-    console.log("🚀 승강기 API 서버가 [신버전 공공데이터 최적화 모드]로 가동 시작!");
+    console.log("🚀 승강기 API 서버가 [실무 검증 완료 모드]로 가동 시작!");
 });
 
 module.exports = app;
