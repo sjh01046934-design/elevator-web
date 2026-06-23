@@ -695,16 +695,18 @@
             if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
             groupedMap.get(key).elevators.push({
-                elevatorNo: apiItem.승강기고유번호 || apiItem.elevatorNo || apiItem.elevator_no || "번호 미상",
-                type: refinedType,
-                speed: finalSpeed,
-                floors: apiItem.운행층수 || apiItem.shuttleSection || apiItem.shuttle_section || "-",
-                weight: finalWeight,
-                capacity: finalCapacity,
-                installPlace: String(apiItem.설치위치 || apiItem.installationPlace || apiItem.installation_place || "-").trim(),
-                state: stts, 
-                isOperating: isOperating
-            });
+    elevatorNo: apiItem.승강기고유번호 || apiItem.elevatorNo || apiItem.elevator_no || "번호 미상",
+    type: refinedType,
+    speed: finalSpeed,
+    floors: apiItem.운행층수 || apiItem.shuttleSection || apiItem.shuttle_section || "-",
+    weight: finalWeight,
+    capacity: finalCapacity,
+    installPlace: String(apiItem.설치위치 || apiItem.installationPlace || apiItem.installation_place || "-").trim(),
+    
+    // [핵심 수정] 서버에서 보낸 '실시간운행상태'를 여기서 state에 확실하게 담습니다.
+    state: apiItem.실시간운행상태 || apiItem.운행상태 || "상태불명", 
+    isOperating: isOperating
+});
         });
 
         globalGroups = Array.from(groupedMap.values());
