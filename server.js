@@ -33,13 +33,15 @@ app.get('/api/elevators', async (req, res) => {
         const result = await pool.query(sql, [`%${keyword}%`]);
         const elevators = result.rows;
 
-        const elevatorsWithStatus = await Promise.all(elevators.map(async (elevator) => {
-            
+        const elevatorsWithStatus = [];
+
+        // [핵심 수정] 동시 다발적 요청(Promise.all) 대신 순차적 요청으로 변경
+        for (const elevator of elevators) {
             const rawElevatorNo = elevator.승강기고유번호 || elevator.elevatorNo || elevator.elevator_no || elevator.승강기번호;
 
             if (!rawElevatorNo) {
-                // 프론트엔드와 맞추기 위해 실시간운행상태 대신 elvtrStts로 통일
-                return { ...elevator, elvtrStts: "번호없음" }; 
+                elevatorsWithStatus.push({ ...elevator, elvtrStts: "번호없음" });
+                continue; // 다음 승강기로 넘어감
             }
 
             const safeElevatorNo = String(rawElevatorNo).trim().padStart(7, '0');
@@ -52,27 +54,32 @@ app.get('/api/elevators', async (req, res) => {
 
                 if (typeof response.data === 'string' && response.data.includes('<errMsg>')) {
                     console.error(`[API 인증키 오류 추정] 승강기: ${safeElevatorNo}`);
-                    return { ...elevator, elvtrStts: "API키오류" }; 
+                    elevatorsWithStatus.push({ ...elevator, elvtrStts: "API키오류" });
+                    continue;
                 }
 
-                // [핵심 수정 1] 공공데이터의 기형적인 JSON 구조(items 껍질 유무)를 모두 커버합니다.
+                // 공공데이터의 기형적인 JSON 구조 커버 (items 껍질 유무)
                 const items = response.data?.response?.body?.items?.item || response.data?.response?.body?.item;
                 let currentStatus = "상태알수없음";
 
                 if (items) {
                      const itemData = Array.isArray(items) ? items[0] : items;
-                     // [핵심 수정 2] 로그에서 확인된 'elvtrStts' 필드를 최우선으로 가져옵니다.
+                     // 정부 API 데이터의 elvtrStts 필드 최우선 추출
                      currentStatus = itemData.elvtrStts || itemData.elvtrSttsNm || "상태알수없음"; 
                 }
 
-                return { ...elevator, elvtrStts: currentStatus };
+                elevatorsWithStatus.push({ ...elevator, elvtrStts: currentStatus });
 
             } catch (apiError) {
-                console.error(`❌ API 통신 실패 (승강기: ${safeElevatorNo})`);
-                return { ...elevator, elvtrStts: "확인불가" }; 
+                console.error(`❌ API 통신 실패 (승강기: ${safeElevatorNo}) - ${apiError.message}`);
+                elevatorsWithStatus.push({ ...elevator, elvtrStts: "확인불가" }); 
             }
-        }));
 
+            // [가장 중요한 핵심] 공공데이터 서버 트래픽 차단을 피하기 위한 0.1초(100ms) 대기
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        // 반복문이 다 끝난 후 최종 결과를 전송
         res.json(elevatorsWithStatus);
 
     } catch (error) {
@@ -86,7 +93,7 @@ app.get('/', (req, res) => {
 });
 
 app.listen(3000, () => {
-    console.log("🚀 승강기 API 서버가 [파싱 오류 수정 완료 모드]로 가동 시작!");
+    console.log("🚀 승강기 API 서버가 [공공데이터 트래픽 차단 우회 모드]로 가동 시작!");
 });
 
 module.exports = app;
