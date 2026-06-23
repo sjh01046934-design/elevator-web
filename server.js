@@ -38,7 +38,8 @@ app.get('/api/elevators', async (req, res) => {
             const rawElevatorNo = elevator.승강기고유번호 || elevator.elevatorNo || elevator.elevator_no || elevator.승강기번호;
 
             if (!rawElevatorNo) {
-                return { ...elevator, 실시간운행상태: "번호없음" };
+                // 프론트엔드와 맞추기 위해 실시간운행상태 대신 elvtrStts로 통일
+                return { ...elevator, elvtrStts: "번호없음" }; 
             }
 
             const safeElevatorNo = String(rawElevatorNo).trim().padStart(7, '0');
@@ -51,16 +52,16 @@ app.get('/api/elevators', async (req, res) => {
 
                 if (typeof response.data === 'string' && response.data.includes('<errMsg>')) {
                     console.error(`[API 인증키 오류 추정] 승강기: ${safeElevatorNo}`);
-                    return { ...elevator, 실시간운행상태: "API키오류" }; 
+                    return { ...elevator, elvtrStts: "API키오류" }; 
                 }
 
-                // [핵심 수정] elvtrSttsNm이 없을 경우 elvtrStts를 우선적으로 사용하도록 변경
-                const items = response.data?.response?.body?.items?.item;
+                // [핵심 수정 1] 공공데이터의 기형적인 JSON 구조(items 껍질 유무)를 모두 커버합니다.
+                const items = response.data?.response?.body?.items?.item || response.data?.response?.body?.item;
                 let currentStatus = "상태알수없음";
 
                 if (items) {
                      const itemData = Array.isArray(items) ? items[0] : items;
-                     // 로그에서 확인된 'elvtrStts' 필드를 우선적으로 가져오도록 수정 완료!
+                     // [핵심 수정 2] 로그에서 확인된 'elvtrStts' 필드를 최우선으로 가져옵니다.
                      currentStatus = itemData.elvtrStts || itemData.elvtrSttsNm || "상태알수없음"; 
                 }
 
@@ -68,7 +69,7 @@ app.get('/api/elevators', async (req, res) => {
 
             } catch (apiError) {
                 console.error(`❌ API 통신 실패 (승강기: ${safeElevatorNo})`);
-                return { ...elevator, 실시간운행상태: "확인불가" }; 
+                return { ...elevator, elvtrStts: "확인불가" }; 
             }
         }));
 
