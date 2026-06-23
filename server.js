@@ -64,7 +64,7 @@ app.get('/api/elevators', async (req, res) => {
                      currentStatus = itemData.elvtrStts || itemData.elvtrSttsNm || "상태알수없음"; 
                 }
 
-                return { ...elevator, 실시간운행상태: currentStatus, elvtrStts: currentStatus };
+                return { ...elevator, elvtrStts: currentStatus };
 
             } catch (apiError) {
                 console.error(`❌ API 통신 실패 (승강기: ${safeElevatorNo})`);
