@@ -72,4 +72,29 @@ app.get('/api/elevators', async (req, res) => {
             } catch (apiError) {
                 console.error(`API 호출 실패 (승강기번호: ${elevatorNo}):`, apiError.message);
                 // 통신 실패 시 에러를 내지 않고 '확인불가' 상태로 지도에 정상 표시되게 처리
-                return { ...elevator, 실시간운행상태: "확인불가" };
+                return { ...elevator, 실시간운행상태: "확인불가" }; 
+            }
+        }));
+
+        // [3단계] 실시간 상태가 모두 결합된 최종 데이터를 웹브라우저/스마트폰으로 발송
+        res.json(elevatorsWithStatus);
+
+    } catch (error) {
+        console.error("DB 검색 에러:", error);
+        res.status(500).send("서버 에러가 발생했습니다.");
+    }
+});
+
+// 3. 메인 HTML 파일 서빙
+app.get('/', (req, res) => {
+    // 서버와 같은 폴더에 있는 index1.html을 바로 브라우저에 배달합니다.
+    res.sendFile(path.join(__dirname, 'index1.html')); 
+});
+
+// 4. 통신 서버 켜기 (3000번 포트)
+app.listen(3000, () => {
+    console.log("🚀 승강기 API 서버가 [공공데이터 실시간 연동 모드]로 3000번 포트에서 가동을 시작했습니다!");
+});
+
+// [Render 배포용 필수 코드]
+module.exports = app;
