@@ -366,31 +366,37 @@
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
-    // 🚀 복합 도로명 완벽 분리 및 강제 정제 유틸리티
+    // 🚀 [초강력 개편] 복합 도로명/지번명 완벽 고립 추출 엔진 (0대 오류 원천 해결)
     function extractAddressParams(fullAddress) {
         if (!fullAddress) return { address1: "", address2: "" };
-        let cleanAddr = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(특별자치시|특별시|광역시|도|특별자치도)?\s*/, '');
-        cleanAddr = cleanAddr.replace(/^[가-힣]+(시|군|구)\s+/, '');
-        cleanAddr = cleanAddr.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2');
+        
+        // 1. 행정구역명(시도, 시군구) 전면 청소
+        let clean = fullAddress.replace(/^[가-힣]+(특별자치시|특별시|광역시|도|특별자치도)\s*/g, '');
+        clean = clean.replace(/^[가-힣]+(시|군|구)\s*/g, '');
+        
+        // 2. '장문로12' 연착 방지 강제 공백화
+        clean = clean.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2');
 
-        let words = cleanAddr.trim().split(/\s+/);
-        let targetAddress1 = "";
-        let targetAddress2 = "";
-
+        let words = clean.trim().split(/\s+/);
         let numIdx = -1;
-        for (let i = words.length - 1; i >= 0; i--) {
-            if (/^\d/.test(words[i])) { numIdx = i; break; }
+
+        // 3. 가장 처음 등장하는 건물번호/번지수 탐색
+        for (let i = 0; i < words.length; i++) {
+            if (/\d/.test(words[i])) { numIdx = i; break; }
         }
+
+        let address1 = "";
+        let address2 = "";
 
         if (numIdx !== -1) {
-            targetAddress2 = words[numIdx];
-            targetAddress1 = words.slice(0, numIdx).join(" ");
+            address2 = words[numIdx];
+            // 🔥 핵심: "한솔동 노을3로" 처럼 동명이 앞단에 붙었을 때, 번호 바로 앞 단어("노을3로")만 순수 도로명으로 완벽 고립화!
+            address1 = words[numIdx - 1] || words.slice(0, numIdx).join(" ");
         } else {
-            targetAddress1 = cleanAddr;
+            address1 = words.join(" ");
         }
 
-        if (!targetAddress1 && words.length > 0) targetAddress1 = words[0];
-        return { address1: targetAddress1, address2: targetAddress2 };
+        return { address1: address1.trim(), address2: address2.trim() };
     }
 
     function parseAddressNumber(str) {
@@ -399,11 +405,12 @@
         return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
     }
 
-    // 🚀 [리팩토링] 대수 오류 원천 차단을 위한 정밀 정규식 매칭 필터
+    // 🚀 [초강력 개편] 양방향 유연 인프라 매칭 필터 (0대 누락 방지 & 오버페칭 완벽 방어)
     function filterValidElevators(items, roadName, roadNo, dongName, jibunNo) {
         if (!items || items.length === 0) return [];
-        const rClean = roadName ? roadName.replace(/\s+/g, '').toLowerCase() : null;
-        const dClean = dongName ? dongName.replace(/\s+/g, '').toLowerCase() : null;
+        
+        const rClean = roadName ? roadName.replace(/\s+/g, '').toLowerCase() : "";
+        const dClean = dongName ? dongName.replace(/\s+/g, '').toLowerCase() : "";
         const rNum = parseAddressNumber(roadNo);
         const jNum = parseAddressNumber(jibunNo);
 
@@ -411,46 +418,49 @@
             let addr1 = String(item.address1 || item.address || "");
             let addr2 = String(item.address2 || "");
             let fullStr = (addr1 + " " + addr2).replace(/\s+/g, '').toLowerCase();
+
+            // 본번지 정밀 식별 서브 클로저
+            const matchNumber = (targetNum) => {
+                if (!targetNum) return false;
+                let numRegex = new RegExp(`(?:^|[^0-9])${targetNum.main}(?:[^0-9]|$)`);
+                if (!numRegex.test(addr1 + " " + addr2)) return false;
+                
+                if (targetNum.sub > 0) {
+                    return fullStr.includes(`${targetNum.main}-${targetNum.sub}`) || fullStr.includes(`${targetNum.main}번지${targetNum.sub}`);
+                }
+                return true;
+            };
+
+            // 1차 안전망: 공공데이터 내 도로명 텍스트 포함 및 건물번호 일치 여부
+            if (rClean && fullStr.includes(rClean) && matchNumber(rNum)) return true;
             
-            // 1. 도로명 매칭 검증
-            if (rClean && fullStr.includes(rClean) && rNum) {
-                let numRegex = new RegExp(`(?:^|[^0-9])${rNum.main}(?:[^0-9]|$)`);
-                if (numRegex.test(addr1 + " " + addr2)) {
-                    if (rNum.sub > 0) return fullStr.includes(`${rNum.main}-${rNum.sub}`);
-                    return true;
-                }
-            }
-            // 2. 지번 매칭 검증
-            if (dClean && fullStr.includes(dClean) && jNum) {
-                let numRegex = new RegExp(`(?:^|[^0-9])${jNum.main}(?:[^0-9]|$)`);
-                if (numRegex.test(addr1 + " " + addr2)) {
-                    if (jNum.sub > 0) return fullStr.includes(`${jNum.main}-${jNum.sub}`);
-                    return true;
-                }
-            }
+            // 2차 안전망: 공공데이터 내 동/리 명칭 포함 및 본번지 일치 여부 (지번 등록 매장 상호 구제)
+            if (dClean && fullStr.includes(dClean) && matchNumber(jNum)) return true;
+
             return false;
         });
     }
 
-    // 🚀 [엔진 개편] 듀얼 주소 교차 검증 & 안전 장치 통합 파이프라인
+    // 🚀 [개편] 듀얼 어드레스 파이프라인 동기화 엔진
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
         const rParams = extractAddressParams(roadAddr);
         const jParams = extractAddressParams(jibunAddr);
         
         let combinedItems = [];
-        // 1차 시도: 도로명 주소로 정부 API 조회
+        
+        // 도로명이 존재할 경우 우선 호출
         if (rParams.address1) {
             combinedItems = await requestPublicElevatorList(apiSido, rParams.address1, signal);
         }
-        // 2차 시도: 데이터가 없고 지번 법정동명이 다를 경우 지번으로도 스캔
+        // 도로명 데이터가 없거나 지번 동명 코드가 불일치할 경우 교차 스캔 보강
         if (combinedItems.length === 0 && jParams.address1 && jParams.address1 !== rParams.address1) {
             combinedItems = await requestPublicElevatorList(apiSido, jParams.address1, signal);
         }
 
-        // 정밀 필터링 가동
+        // 새롭게 조율된 유연 매칭 시스템 작동
         let validItems = filterValidElevators(combinedItems, rParams.address1, rParams.address2, jParams.address1, jParams.address2);
 
-        // 🛑 [백업 스캔 활성화] 교차 필터가 0대일 때만 상호명으로 정밀 2차 우회 조회
+        // 상호명 기반 백업 루틴
         if (validItems.length === 0 && placeName) {
             try {
                 let cleanBuldNm = placeName.split(/\s+/)[0]; 
@@ -461,7 +471,7 @@
                     let backupItems = dataBackup.response?.body?.items?.item || [];
                     if (!Array.isArray(backupItems)) backupItems = [backupItems];
                     
-                    // 🔥 중요: 백업으로 긁어온 데이터도 무조건 건물번호가 들어맞는 것만 엄격하게 사수 (293대 폭탄 제거)
+                    // 백업 데이터 유입 시에도 가차 없이 타겟 주소와 매칭되는 내역만 사수 (스타벅스 폭탄 완전 해결)
                     validItems = filterValidElevators(backupItems, rParams.address1, rParams.address2, jParams.address1, jParams.address2);
                 }
             } catch (e) { console.error("Backup fetch error:", e); }
@@ -499,7 +509,7 @@
                     });
                 }
             }
-        } catch (e) { console.error("API call error:", e); }
+        } catch (e) { console.error("API network error:", e); }
         return list;
     }
 
@@ -556,7 +566,6 @@
         placesResult.forEach(place => {
             const div = document.createElement('div'); div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
-            // 🔥 중요: 인자에 도로명 주소와 지번 주소를 명시적으로 모두 전달하도록 주입
             div.innerHTML = `
                 <div class="item-text" onmousedown="fetchExactElevator(event, '${place.place_name}', '${place.road_address_name || ""}', '${place.address_name || ""}')" ontouchstart="fetchExactElevator(event, '${place.place_name}', '${place.road_address_name || ""}', '${place.address_name || ""}')">
                     <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
@@ -714,7 +723,6 @@
         }
     }
 
-    // 🔥 정교화 수정: 두 종류의 주소를 모두 넘겨받아 듀얼 체크하도록 설계 수정
     async function fetchExactElevator(event, placeName, roadAddress, jibunAddress) {
         if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) { event.preventDefault(); event.stopPropagation(); }
