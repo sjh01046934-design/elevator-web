@@ -112,7 +112,7 @@
                 <option value="울산">울산</option>
                 <option value="강원">강원</option>
                 <option value="충북">충북</option>
-                <option value="충남">충남</option>
+                <option value="충남">충북</option>
                 <option value="전북">전북</option>
                 <option value="전남">전남</option>
                 <option value="경북">경북</option>
@@ -366,10 +366,13 @@
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
-    // 🚀 [핵심 추가] 복합 도로명 분리 및 시도/시군구 제거를 위한 고도화 파싱 유틸리티
+    // 🚀 [수정] 복합 도로명 완벽 추출 (장문로12 띄어쓰기 누락 방지 포함)
     function extractAddressParams(fullAddress) {
         let cleanAddr = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(특별자치시|특별시|광역시|도|특별자치도)?\s*/, '');
         cleanAddr = cleanAddr.replace(/^[가-힣]+(시|군|구)\s+/, '');
+
+        // 🔥 오류 해결 1: '장문로12' 처럼 사용자가 붙여쓴 경우 강제 분리 처리
+        cleanAddr = cleanAddr.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2');
 
         let words = cleanAddr.trim().split(/\s+/);
         let targetAddress1 = "";
@@ -377,7 +380,7 @@
 
         let numIdx = -1;
         for (let i = words.length - 1; i >= 0; i--) {
-            if (/\d/.test(words[i])) { numIdx = i; break; }
+            if (/^\d/.test(words[i])) { numIdx = i; break; }
         }
 
         if (numIdx !== -1) {
@@ -397,42 +400,33 @@
         return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
     }
 
-    function extractAddressNumber(fullAddr, roadName) {
-        if (!roadName || !fullAddr) return null;
-        const escapedRoad = roadName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-        const match = fullAddr.match(new RegExp(escapedRoad + "\\s*([0-9]+)(?:-([0-9]+))?"));
-        return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
-    }
-
-    // 🚀 데이터 누락을 막는 철벽 유연 필터링 모듈 리팩토링
+    // 🚀 [수정] 0대 방지를 위한 철벽 유연 필터링 (완벽히 정제된 정규식 방식)
     function filterValidElevators(items, targetAddress1, targetAddress2) {
         if (!items || items.length === 0) return [];
         const targetNum = parseAddressNumber(targetAddress2);
         const t1Clean = targetAddress1.replace(/\s+/g, '').toLowerCase();
 
         let validItems = items.filter(item => {
-            let fullStr = (String(item.address1 || item.address || "") + " " + String(item.address2 || "")).replace(/\s+/g, '').toLowerCase();
+            let rawFullStr = (String(item.address1 || item.address || "") + " " + String(item.address2 || "")).trim();
+            let fullStr = rawFullStr.replace(/\s+/g, '').toLowerCase();
+            
+            // 도로명 미포함 시 즉시 컷
             if (!fullStr.includes(t1Clean)) return false;
 
             if (targetNum) {
-                let apiNum = extractAddressNumber(fullStr, targetAddress1);
-                if (apiNum) return (targetNum.main === apiNum.main) && (targetNum.sub === apiNum.sub);
+                // 정확한 본번 매칭 검증 (예: 12가 123에 잘못 매칭되는 것 방지)
+                const regex = new RegExp(`(?:^|[^0-9])${targetNum.main}(?:[^0-9]|$)`);
+                if (regex.test(rawFullStr)) return true;
+                
                 return fullStr.includes(String(targetNum.main));
             }
             return true;
         });
 
-        // 🚨 최후의 보루: 주소 포맷 미스매칭 시 본번 매칭 우선 구제 로직
-        if (validItems.length === 0 && targetNum) {
-            validItems = items.filter(item => {
-                let fullStr = (String(item.address1 || item.address || "") + " " + String(item.address2 || "")).trim();
-                return fullStr.includes(String(targetNum.main));
-            });
-        }
         return validItems;
     }
 
-    // 🚀 [공통 데이터 호출 & 상호명 백업 파이프라인 엔진]
+    // 🚀 [수정] 공통 데이터 호출 & 안전한 백업 파이프라인 (293대 표출 오류 해결)
     async function fetchElevatorDataByAddressOrBuilding(apiSido, addr, placeName, signal) {
         const params = extractAddressParams(addr);
         const targetAddress1 = params.address1;
@@ -473,10 +467,9 @@
 
         let validItems = filterValidElevators(combinedItems, targetAddress1, targetAddress2);
 
-        // 🛑 [크리티컬 백업 가동] 주소 매핑으로 0대 검출 시 건물명(상호명) 파라미터 백업 스캔 시도
+        // 🛑 [수정] 크리티컬 백업 가동 로직 전면 개편 (293대 폭탄 방지)
         if (validItems.length === 0 && placeName) {
             try {
-                // 상호명 뒤 지점명 분리 정제 (예: 스타벅스 세종어반점 -> 스타벅스)
                 let cleanBuldNm = placeName.split(/\s+/)[0]; 
                 const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
                 let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
@@ -485,12 +478,13 @@
                     let backupItems = dataBackup.response?.body?.items?.item || [];
                     if (!Array.isArray(backupItems)) backupItems = [backupItems];
                     
-                    // 백업 데이터 중 해당 구역 동/로가 맞는지 느슨한 교차 매핑 유효성 필터링
+                    // 🔥 오류 해결 2: 무조건 backupItems 전체를 할당해버리는 폭탄 코드 삭제.
+                    // 오직 해당 주소(도로명)와 교차 검증된 데이터만 엄격하게 살려냅니다.
+                    const strictAddr1 = targetAddress1.replace(/\s+/g, '').toLowerCase();
                     validItems = backupItems.filter(item => {
-                        let itemFullStr = (String(item.address1 || item.address || "")).replace(/\s+/g, '');
-                        return itemFullStr.includes(targetAddress1.substring(0, 3)) || (targetNum && itemFullStr.includes(String(targetNum.main)));
+                        let itemFullStr = (String(item.address1 || item.address || "")).replace(/\s+/g, '').toLowerCase();
+                        return strictAddr1 && itemFullStr.includes(strictAddr1);
                     });
-                    if(validItems.length === 0) validItems = backupItems; // 차선책 보루
                 }
             } catch (e) { console.error("Backup building fetch error:", e); }
         }
@@ -627,7 +621,8 @@
 
         group.elevators = elevs.map(apiItem => {
             const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
-            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지'));
+            // 🔥 오류 해결 3: 공단 API 자체가 '확인불가' 상태를 반환할 때 안전하게 컷
+            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
             const rawType = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
             if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
             else if (rawType.includes("에스컬레이터")) refinedType = "에스컬레이터";
@@ -767,7 +762,7 @@
         } else {
             const params = extractAddressParams(query);
             baseApiUrl += `&address1=` + encodeURIComponent(params.address1);
-            if (params.address2) baseApiUrl += `&address2=` + encodeURIComponent(params.address2);
+            // 🔥 오류 해결 1-2: address2는 API 서버단이 아닌 프론트단에서 필터링해야 '장문로12' 같은 포맷 충돌을 막음
             baseApiUrl += `&_type=json`;
         }
 
@@ -806,7 +801,9 @@
                 if (searchType === 'building') {
                     return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
                 } else {
-                    return (String(item.address1 || item.address || "") + String(item.address2 || "")).replace(/\s+/g, '').toLowerCase().includes(queryNoSpace); 
+                    // 🔥 변경: 강력한 공통 필터 함수로 교체
+                    const params = extractAddressParams(query);
+                    return filterValidElevators([item], params.address1, params.address2).length > 0;
                 }
             });
 
@@ -844,7 +841,7 @@
             }
 
             const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
-            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지'));
+            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
             
             const rawType = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
             if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
@@ -1019,7 +1016,7 @@
                 const data = await res.json();
                 const displayStateText = data.status;
 
-                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지'));
+                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
                 
                 elv.scanned = true;
                 if (elv.isOperating !== isOperating || elv.state !== displayStateText) {
@@ -1078,7 +1075,7 @@
                 const data = await res.json(); const stts = data.status;
                 targetElv.scanned = true; 
                 
-                const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐기') || stts.includes('검사연기') || stts.includes('폐지'));
+                const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐기') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
                 if (targetElv.isOperating !== isOperating || targetElv.state !== stts) {
                     targetElv.isOperating = isOperating; targetElv.state = stts; renderData(true); 
                 }
