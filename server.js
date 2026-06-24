@@ -3,12 +3,16 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
 const axios = require('axios'); 
+const NodeCache = require('node-cache'); // [추가] 인메모리 캐시 모듈
 
 const app = express();
 app.use(cors()); 
 
 // 🔥 실무 검증 완료된 API 인증키
 const PUBLIC_API_KEY = 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d';
+
+// 🔥 캐시 저장소 생성 (데이터를 10분(600초) 동안 보관)
+const statusCache = new NodeCache({ stdTTL: 600 });
 
 // 1. 데이터베이스 연결 설정
 const pool = new Pool({
@@ -28,7 +32,7 @@ app.get('/api/elevators', async (req, res) => {
             FROM elevators_raw A
             LEFT JOIN coords_raw B ON A.건물명 = B.건물명
             WHERE A.건물명 LIKE $1
-            LIMIT 1500  /* 🚀 대리님 요청사항: 대규모 단지도 모두 나오도록 1500으로 확장! */
+            LIMIT 1500  /* 🚀 대규모 단지도 모두 나오도록 1500으로 확장! */
         `;
         const result = await pool.query(sql, [`%${keyword}%`]);
         
@@ -41,15 +45,22 @@ app.get('/api/elevators', async (req, res) => {
     }
 });
 
-// [기능 2] 실시간 운행상태 조회 API (바텀시트 열릴 때 해당 건물만 개별 조회)
+// [기능 2] 실시간 운행상태 조회 API (캐싱 적용 완료!)
 app.get('/api/realtime-status', async (req, res) => {
     const elevatorNo = req.query.elevatorNo; // 단일 승강기 번호
     if (!elevatorNo) return res.status(400).json({ status: "번호없음" });
 
     const safeElevatorNo = String(elevatorNo).trim().padStart(7, '0');
     
+    // 💡 [핵심] 1. 캐시 메모리에 이 승강기 번호가 있는지 먼저 확인합니다.
+    const cachedStatus = statusCache.get(safeElevatorNo);
+    if (cachedStatus) {
+        // 이미 10분 내에 조회한 적이 있다면 정부 서버를 찌르지 않고 즉시 반환!
+        return res.json({ status: cachedStatus }); 
+    }
+
     try {
-        // 검증된 getElevatorViewM 엔드포인트 호출
+        // 2. 캐시에 없으면 그때서야 정부 API를 호출합니다.
         const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
         
         const response = await axios.get(apiUrl, { timeout: 3000 });
@@ -69,6 +80,9 @@ app.get('/api/realtime-status', async (req, res) => {
              currentStatus = itemData.elvtrStts || itemData.elvtrSttsNm || "상태알수없음"; 
         }
 
+        // 💡 [핵심] 3. 정부에서 가져온 따끈따끈한 결과를 10분 동안 캐시에 저장해 둡니다.
+        statusCache.set(safeElevatorNo, currentStatus);
+
         res.json({ status: currentStatus });
 
     } catch (error) {
@@ -82,7 +96,7 @@ app.get('/', (req, res) => {
 });
 
 app.listen(3000, () => {
-    console.log("🚀 승강기 API 서버가 [초고속 클릭-실시간 연동 + 1500대 확장 모드]로 가동 시작했습니다!");
+    console.log("🚀 승강기 API 서버가 [인메모리 캐싱 + 1500대 확장 모드]로 가동 시작했습니다!");
 });
 
 module.exports = app;
