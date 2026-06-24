@@ -112,7 +112,7 @@
                 <option value="울산">울산</option>
                 <option value="강원">강원</option>
                 <option value="충북">충북</option>
-                <option value="충남">충북</option>
+                <option value="충남">충남</option>
                 <option value="전북">전북</option>
                 <option value="전남">전남</option>
                 <option value="경북">경북</option>
@@ -366,12 +366,11 @@
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
-    // 🚀 [수정] 복합 도로명 완벽 추출 (장문로12 띄어쓰기 누락 방지 포함)
+    // 🚀 복합 도로명 완벽 분리 및 강제 정제 유틸리티
     function extractAddressParams(fullAddress) {
+        if (!fullAddress) return { address1: "", address2: "" };
         let cleanAddr = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(특별자치시|특별시|광역시|도|특별자치도)?\s*/, '');
         cleanAddr = cleanAddr.replace(/^[가-힣]+(시|군|구)\s+/, '');
-
-        // 🔥 오류 해결 1: '장문로12' 처럼 사용자가 붙여쓴 경우 강제 분리 처리
         cleanAddr = cleanAddr.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2');
 
         let words = cleanAddr.trim().split(/\s+/);
@@ -400,74 +399,58 @@
         return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
     }
 
-    // 🚀 [수정] 0대 방지를 위한 철벽 유연 필터링 (완벽히 정제된 정규식 방식)
-    function filterValidElevators(items, targetAddress1, targetAddress2) {
+    // 🚀 [리팩토링] 대수 오류 원천 차단을 위한 정밀 정규식 매칭 필터
+    function filterValidElevators(items, roadName, roadNo, dongName, jibunNo) {
         if (!items || items.length === 0) return [];
-        const targetNum = parseAddressNumber(targetAddress2);
-        const t1Clean = targetAddress1.replace(/\s+/g, '').toLowerCase();
+        const rClean = roadName ? roadName.replace(/\s+/g, '').toLowerCase() : null;
+        const dClean = dongName ? dongName.replace(/\s+/g, '').toLowerCase() : null;
+        const rNum = parseAddressNumber(roadNo);
+        const jNum = parseAddressNumber(jibunNo);
 
-        let validItems = items.filter(item => {
-            let rawFullStr = (String(item.address1 || item.address || "") + " " + String(item.address2 || "")).trim();
-            let fullStr = rawFullStr.replace(/\s+/g, '').toLowerCase();
+        return items.filter(item => {
+            let addr1 = String(item.address1 || item.address || "");
+            let addr2 = String(item.address2 || "");
+            let fullStr = (addr1 + " " + addr2).replace(/\s+/g, '').toLowerCase();
             
-            // 도로명 미포함 시 즉시 컷
-            if (!fullStr.includes(t1Clean)) return false;
-
-            if (targetNum) {
-                // 정확한 본번 매칭 검증 (예: 12가 123에 잘못 매칭되는 것 방지)
-                const regex = new RegExp(`(?:^|[^0-9])${targetNum.main}(?:[^0-9]|$)`);
-                if (regex.test(rawFullStr)) return true;
-                
-                return fullStr.includes(String(targetNum.main));
-            }
-            return true;
-        });
-
-        return validItems;
-    }
-
-    // 🚀 [수정] 공통 데이터 호출 & 안전한 백업 파이프라인 (293대 표출 오류 해결)
-    async function fetchElevatorDataByAddressOrBuilding(apiSido, addr, placeName, signal) {
-        const params = extractAddressParams(addr);
-        const targetAddress1 = params.address1;
-        const targetAddress2 = params.address2;
-
-        const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
-        let combinedItems = [];
-        
-        try {
-            let resFirst = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
-            if (resFirst.ok) {
-                let dataFirst = await resFirst.json();
-                let totalCount = dataFirst.response?.body?.totalCount || 0;
-                let items = dataFirst.response?.body?.items?.item || [];
-                if (!Array.isArray(items)) items = [items];
-                combinedItems.push(...items);
-
-                let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
-                if (maxPages > 1) {
-                    let fetchPromises = [];
-                    for (let p = 2; p <= maxPages; p++) {
-                        fetchPromises.push(
-                            fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal })
-                            .then(r => r.ok ? r.json() : null).catch(() => null)
-                        );
-                    }
-                    let results = await Promise.all(fetchPromises);
-                    results.forEach(resData => {
-                        if (resData && resData.response?.body?.items?.item) {
-                            let itms = resData.response.body.items.item;
-                            if (!Array.isArray(itms)) itms = [itms];
-                            combinedItems.push(...itms);
-                        }
-                    });
+            // 1. 도로명 매칭 검증
+            if (rClean && fullStr.includes(rClean) && rNum) {
+                let numRegex = new RegExp(`(?:^|[^0-9])${rNum.main}(?:[^0-9]|$)`);
+                if (numRegex.test(addr1 + " " + addr2)) {
+                    if (rNum.sub > 0) return fullStr.includes(`${rNum.main}-${rNum.sub}`);
+                    return true;
                 }
             }
-        } catch (e) { console.error("Address fetch error:", e); }
+            // 2. 지번 매칭 검증
+            if (dClean && fullStr.includes(dClean) && jNum) {
+                let numRegex = new RegExp(`(?:^|[^0-9])${jNum.main}(?:[^0-9]|$)`);
+                if (numRegex.test(addr1 + " " + addr2)) {
+                    if (jNum.sub > 0) return fullStr.includes(`${jNum.main}-${jNum.sub}`);
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
 
-        let validItems = filterValidElevators(combinedItems, targetAddress1, targetAddress2);
+    // 🚀 [엔진 개편] 듀얼 주소 교차 검증 & 안전 장치 통합 파이프라인
+    async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
+        const rParams = extractAddressParams(roadAddr);
+        const jParams = extractAddressParams(jibunAddr);
+        
+        let combinedItems = [];
+        // 1차 시도: 도로명 주소로 정부 API 조회
+        if (rParams.address1) {
+            combinedItems = await requestPublicElevatorList(apiSido, rParams.address1, signal);
+        }
+        // 2차 시도: 데이터가 없고 지번 법정동명이 다를 경우 지번으로도 스캔
+        if (combinedItems.length === 0 && jParams.address1 && jParams.address1 !== rParams.address1) {
+            combinedItems = await requestPublicElevatorList(apiSido, jParams.address1, signal);
+        }
 
-        // 🛑 [수정] 크리티컬 백업 가동 로직 전면 개편 (293대 폭탄 방지)
+        // 정밀 필터링 가동
+        let validItems = filterValidElevators(combinedItems, rParams.address1, rParams.address2, jParams.address1, jParams.address2);
+
+        // 🛑 [백업 스캔 활성화] 교차 필터가 0대일 때만 상호명으로 정밀 2차 우회 조회
         if (validItems.length === 0 && placeName) {
             try {
                 let cleanBuldNm = placeName.split(/\s+/)[0]; 
@@ -478,18 +461,46 @@
                     let backupItems = dataBackup.response?.body?.items?.item || [];
                     if (!Array.isArray(backupItems)) backupItems = [backupItems];
                     
-                    // 🔥 오류 해결 2: 무조건 backupItems 전체를 할당해버리는 폭탄 코드 삭제.
-                    // 오직 해당 주소(도로명)와 교차 검증된 데이터만 엄격하게 살려냅니다.
-                    const strictAddr1 = targetAddress1.replace(/\s+/g, '').toLowerCase();
-                    validItems = backupItems.filter(item => {
-                        let itemFullStr = (String(item.address1 || item.address || "")).replace(/\s+/g, '').toLowerCase();
-                        return strictAddr1 && itemFullStr.includes(strictAddr1);
+                    // 🔥 중요: 백업으로 긁어온 데이터도 무조건 건물번호가 들어맞는 것만 엄격하게 사수 (293대 폭탄 제거)
+                    validItems = filterValidElevators(backupItems, rParams.address1, rParams.address2, jParams.address1, jParams.address2);
+                }
+            } catch (e) { console.error("Backup fetch error:", e); }
+        }
+        return validItems;
+    }
+
+    async function requestPublicElevatorList(apiSido, address1, signal) {
+        const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(address1)}&_type=json`;
+        let list = [];
+        try {
+            let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
+            if (res.ok) {
+                let data = await res.json();
+                let totalCount = data.response?.body?.totalCount || 0;
+                let items = data.response?.body?.items?.item || [];
+                if (!Array.isArray(items)) items = [items];
+                list.push(...items);
+
+                let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
+                if (maxPages > 1) {
+                    let fetchPromises = [];
+                    for (let p = 2; p <= maxPages; p++) {
+                        fetchPromises.push(
+                            fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal }).then(r => r.ok ? r.json() : null).catch(() => null)
+                        );
+                    }
+                    let results = await Promise.all(fetchPromises);
+                    results.forEach(resData => {
+                        if (resData && resData.response?.body?.items?.item) {
+                            let itms = resData.response.body.items.item;
+                            if (!Array.isArray(itms)) itms = [itms];
+                            list.push(...itms);
+                        }
                     });
                 }
-            } catch (e) { console.error("Backup building fetch error:", e); }
-        }
-
-        return validItems;
+            }
+        } catch (e) { console.error("API call error:", e); }
+        return list;
     }
 
     function searchKakaoPlaces() {
@@ -545,8 +556,9 @@
         placesResult.forEach(place => {
             const div = document.createElement('div'); div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
+            // 🔥 중요: 인자에 도로명 주소와 지번 주소를 명시적으로 모두 전달하도록 주입
             div.innerHTML = `
-                <div class="item-text" onmousedown="fetchExactElevator(event, '${place.place_name}', '${displayAddr}')" ontouchstart="fetchExactElevator(event, '${place.place_name}', '${displayAddr}')">
+                <div class="item-text" onmousedown="fetchExactElevator(event, '${place.place_name}', '${place.road_address_name || ""}', '${place.address_name || ""}')" ontouchstart="fetchExactElevator(event, '${place.place_name}', '${place.road_address_name || ""}', '${place.address_name || ""}')">
                     <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
                     <span style="font-size:11px; color:#666;">📍 ${displayAddr}</span>
                 </div>
@@ -594,6 +606,7 @@
         globalGroups = placeArray.map(p => {
             return {
                 buildingName: p.place_name, address: p.road_address_name || p.address_name,
+                roadAddress: p.road_address_name || "", jibunAddress: p.address_name || "",
                 lat: parseFloat(p.y), lng: parseFloat(p.x), isDummy: true, noElevator: false, elevators: [] 
             };
         });
@@ -606,7 +619,7 @@
         const sido = document.getElementById('sidoSelector').value; 
         const apiSido = FULL_SIDO_MAP[sido] || sido;
         
-        let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, group.address, group.buildingName, signal);
+        let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, group.roadAddress || group.address, group.jibunAddress || group.address, group.buildingName, signal);
 
         const uniqueMap = new Map();
         validItems.forEach(item => {
@@ -621,7 +634,6 @@
 
         group.elevators = elevs.map(apiItem => {
             const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
-            // 🔥 오류 해결 3: 공단 API 자체가 '확인불가' 상태를 반환할 때 안전하게 컷
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
             const rawType = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
             if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
@@ -671,7 +683,7 @@
 
         try {
             const fetchPromises = addresses.map(async (addr) => {
-                return await fetchElevatorDataByAddressOrBuilding(apiSido, addr, placeName, signal);
+                return await fetchElevatorDataByAddressOrBuilding(apiSido, addr, addr, placeName, signal);
             });
 
             const results = await Promise.all(fetchPromises);
@@ -702,7 +714,8 @@
         }
     }
 
-    async function fetchExactElevator(event, placeName, address) {
+    // 🔥 정교화 수정: 두 종류의 주소를 모두 넘겨받아 듀얼 체크하도록 설계 수정
+    async function fetchExactElevator(event, placeName, roadAddress, jibunAddress) {
         if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) { event.preventDefault(); event.stopPropagation(); }
         closeDropdown(); cancelSearch(); 
@@ -716,7 +729,7 @@
             const sido = document.getElementById('sidoSelector').value; 
             const apiSido = FULL_SIDO_MAP[sido] || sido;
 
-            let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, address, placeName, signal);
+            let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, roadAddress, jibunAddress, placeName, signal);
 
             const uniqueMap = new Map();
             validItems.forEach(item => {
@@ -762,7 +775,6 @@
         } else {
             const params = extractAddressParams(query);
             baseApiUrl += `&address1=` + encodeURIComponent(params.address1);
-            // 🔥 오류 해결 1-2: address2는 API 서버단이 아닌 프론트단에서 필터링해야 '장문로12' 같은 포맷 충돌을 막음
             baseApiUrl += `&_type=json`;
         }
 
@@ -801,9 +813,8 @@
                 if (searchType === 'building') {
                     return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
                 } else {
-                    // 🔥 변경: 강력한 공통 필터 함수로 교체
                     const params = extractAddressParams(query);
-                    return filterValidElevators([item], params.address1, params.address2).length > 0;
+                    return filterValidElevators([item], params.address1, params.address2, params.address1, params.address2).length > 0;
                 }
             });
 
@@ -834,6 +845,7 @@
             if (!groupedMap.has(key)) {
                 groupedMap.set(key, {
                     buildingName: buldNm, address: address,
+                    roadAddress: addr1 + " " + addr2, jibunAddress: addr1 + " " + addr2,
                     lat: parseFloat(apiItem.gpsLati || apiItem.gps_lati) || null,
                     lng: parseFloat(apiItem.gpsLong || apiItem.gps_long) || null,
                     isDummy: false, noElevator: false, elevators: []
