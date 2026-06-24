@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>엘리맵 - 승강기 설치유무검색서비스</title>
+    <title>승강기 지도 - 승강기 설치유무검색서비스</title>
     
     <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=59f58919246c9ac3780496fc7e2c0d74&libraries=services,clusterer&autoload=false"></script>
     
@@ -50,7 +50,7 @@
         .info-card { padding: 16px; display: flex; flex-direction: column; height: 100%; overflow: hidden; padding-bottom: 24px; }
         .card-header { display: flex; align-items: center; margin-bottom: 12px; flex-shrink: 0; }
         
-        .elevator-icon-box { width: 46px; height: 46px; display: flex; justify-content: center; align-items: center; margin-right: 12px; background: #f4f6f8; border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden; flex-shrink: 0; }
+        .elevator-icon-box { width: 46px; height: 46px; display: flex; justify-content: center; align-items: center; margin-right: 12px; background: #f4f6f8; border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden; flex-shrink: 0; font-size: 24px; }
         
         .status-title { font-size: 16px; font-weight: bold; color: #333; line-height: 1.3;}
         .address-text { font-size: 13px; color: #666; margin-top: 2px; }
@@ -72,7 +72,6 @@
         .data-table th { background-color: #f8fafc; color: #444; font-weight: bold; width: 20%; }
         .data-table td { font-weight: 500; color: #111; width: 30%; }
         
-        /* 마커 아이콘 제거 후 깔끔한 텍스트 UI로 재설계 */
         .custom-marker { background-color: #1e4e79; color: white; padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; box-shadow: 0 3px 6px rgba(0,0,0,0.3); position: relative; white-space: nowrap; cursor: pointer; bottom: 20px; display: flex; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.4); transition: transform 0.1s; letter-spacing: -0.5px;}
         .custom-marker:active { transform: scale(0.95); }
         .custom-marker::after { content: ''; position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%); border-width: 5px 5px 0; border-style: solid; border-color: #1e4e79 transparent; display: block; width: 0; }
@@ -95,7 +94,7 @@
     <div class="search-bar-wrapper">
         <div class="page-header">
             <h1>승강기 지도</h1>
-            <p>승강기 설치유무검색서비스 (세종지사)</p>
+            <p>승강기 설치유무검색서비스</p>
         </div>
         
         <div class="search-bar" id="searchBar">
@@ -144,7 +143,6 @@
     <div class="bottom-sheet" id="bottomSheet">
         <div class="info-card">
             <div class="card-header">
-                <!-- 🚀 리얼 엘리베이터 형태의 공식 Material Design SVG 아이콘 적용 -->
                 <div class="elevator-icon-box">
                     <svg viewBox="0 0 24 24" fill="#1e4e79" width="30" height="30">
                         <path d="M19,5v14H5V5H19 M19,3H5C3.9,3,3,3.9,3,5v14c0,1.1,0.9,2,2,2h14c1.1,0,2-0.9,2-2V5C21,3.9,20.1,3,19,3L19,3z M10,18v-4h1 v-2.5c0-1.1-0.9-2-2-2H8c-1.1,0-2,0.9-2,2V14h1v4H10z M8.5,8.5c0.69,0,1.25-0.56,1.25-1.25S9.19,6,8.5,6S7.25,6.56,7.25,7.25 S7.81,8.5,8.5,8.5z M18,11l-2.5-4L13,11H18z M13,13l2.5,4l2.5-4H13z"/>
@@ -194,7 +192,14 @@
     const DEPLOY_CONFIG = { CLOUDFLARE_WORKER_URL: 'https://wild-river-017e.sjh01046934.workers.dev/?url=' };
     const API_CONFIG = { SERVICE_KEY: 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d', BASE_URL: 'https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM' };
     
-    // 행정구역 자동 분할 매핑 데이터 (광역 스캔용)
+    // 💡 [핵심 버그 수정] 공공데이터용 행정구역 풀네임 변환기
+    const FULL_SIDO_MAP = {
+        "서울": "서울특별시", "부산": "부산광역시", "대구": "대구광역시", "인천": "인천광역시",
+        "광주": "광주광역시", "대전": "대전광역시", "울산": "울산광역시", "세종": "세종특별자치시",
+        "경기": "경기도", "강원": "강원특별자치도", "충북": "충청북도", "충남": "충청남도",
+        "전북": "전북특별자치도", "전남": "전라남도", "경북": "경상북도", "경남": "경상남도", "제주": "제주특별자치도", "전국": ""
+    };
+
     const DISTRICT_MAP = {
         "서울": ["강남구","강동구","강북구","강서구","관악구","광진구","구로구","금천구","노원구","도봉구","동대문구","동작구","마포구","서대문구","서초구","성동구","성북구","송파구","양천구","영등포구","용산구","은평구","종로구","중구","중랑구"],
         "세종": ["조치원읍", "한솔동", "도담동", "아름동", "종촌동", "고운동", "보람동", "새롬동", "다정동", "나성동", "어진동", "반곡동", "소담동", "대평동", "해밀동", "연기면", "연동면", "부강면", "금남면", "장군면", "연서면", "전의면", "전동면", "소정면"],
@@ -360,12 +365,12 @@
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
-    // 유틸리티 함수: 주소 내 번지수 파싱
     function parseAddressNumber(str) {
         if (!str) return null;
         let match = str.match(/([0-9]+)(?:-([0-9]+))?/);
         return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
     }
+
     function extractAddressNumber(fullAddr, roadName) {
         if (!roadName || !fullAddr) return null;
         const escapedRoad = roadName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -400,7 +405,6 @@
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 전체를 표시하세요👇</div>`;
         const sido = document.getElementById('sidoSelector').value; 
 
-        // 🛸 광역 스캔 버튼 (우회/초고속 렌더링)
         if (DISTRICT_MAP[sido]) {
             const megaScanDiv = document.createElement('div');
             megaScanDiv.className = 'dropdown-item';
@@ -419,7 +423,6 @@
         addressList = [...new Set(addressList)];
         const addressStr = JSON.stringify(addressList).replace(/"/g, '&quot;');
 
-        // 🚀 일반 다중 스캔 버튼
         const searchAllDiv = document.createElement('div');
         searchAllDiv.className = 'dropdown-item';
         searchAllDiv.innerHTML = `<div class="item-text" onmousedown="executeMultiAddressSearch(event, ${addressStr}, '${keyword}')" ontouchstart="executeMultiAddressSearch(event, ${addressStr}, '${keyword}')" style="color:#1e4e79; font-weight:bold; text-align:center;">🚀 검색된 '${keyword}' 전체 다 표시하기</div>`;
@@ -439,9 +442,6 @@
         dropdown.style.display = 'block';
     }
 
-    // =========================================================
-    // 🛸 광역 스캔 모드: 껍데기 마커 즉시 렌더링 + 뷰포트 레이더 연동
-    // =========================================================
     async function executeMegaScan(event, sido, keyword) {
         if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) { event.preventDefault(); event.stopPropagation(); }
@@ -456,7 +456,6 @@
         const districts = DISTRICT_MAP[sido] || [sido];
         let allPlaces = [];
 
-        // 25개 행정구역 카카오 동시 검색
         const fetchPromises = districts.map(district => {
             return new Promise(resolve => {
                 places.keywordSearch(`${sido} ${district} ${keyword}`, (result, status) => {
@@ -478,7 +477,6 @@
         hideLoadingMsg();
         if (placeArray.length === 0) { alert(`[${sido}] 지역에 검색된 데이터가 없습니다.`); return; }
 
-        // 스캔 대기용(Dummy) 껍데기 그룹 생성
         globalGroups = placeArray.map(p => {
             return {
                 buildingName: p.place_name, address: p.road_address_name || p.address_name,
@@ -490,9 +488,10 @@
         startBackgroundSync(); 
     }
 
-    // [광역스캔용] 껍데기 마커에 실시간 데이터 채워넣기
     async function hydrateDummyGroup(group, signal) {
         const sido = document.getElementById('sidoSelector').value; 
+        const apiSido = FULL_SIDO_MAP[sido] || sido;
+        
         let targetAddress1 = ""; let targetAddress2 = "";
         let words = group.address.trim().split(/\s+/);
         for (let i = words.length - 1; i >= 0; i--) {
@@ -503,7 +502,7 @@
             else { targetAddress1 = group.address; }
         }
 
-        const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(sido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
+        const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
         try {
             let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
             if (!res.ok) throw new Error();
@@ -580,6 +579,7 @@
         const signal = currentAbortController.signal;
         showLoadingMsg(`⏳ [${placeName}] 관내 전 지점 상세 데이터 스캔 중...`);
         const sido = document.getElementById('sidoSelector').value; 
+        const apiSido = FULL_SIDO_MAP[sido] || sido;
         
         lastQuery = placeName; allElevatorsData = [];
         let combinedItems = [];
@@ -597,7 +597,7 @@
                     else { targetAddress1 = addr; }
                 }
 
-                const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(sido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
+                const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
                 
                 try {
                     let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
@@ -678,6 +678,8 @@
         
         try {
             const sido = document.getElementById('sidoSelector').value; 
+            const apiSido = FULL_SIDO_MAP[sido] || sido;
+
             let targetAddress1 = ""; let targetAddress2 = "";
             let words = address.trim().split(/\s+/);
             for (let i = words.length - 1; i >= 0; i--) {
@@ -688,7 +690,7 @@
                 else { targetAddress1 = address; }
             }
 
-            const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(sido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
+            const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
             let resFirst = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
             if (!resFirst.ok) throw new Error("서버 응답 오류");
             
@@ -769,7 +771,9 @@
         allElevatorsData = []; lastQuery = query; lastSido = sido; saveRecentSearch(sido, query);
         showLoadingMsg("⏳ 서버 통신 준비 중...");
 
-        let baseApiUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=` + encodeURIComponent(lastSido);
+        const apiSido = FULL_SIDO_MAP[lastSido] || lastSido;
+        let baseApiUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=` + encodeURIComponent(apiSido);
+        
         if (searchType === 'building') {
             baseApiUrl += `&buld_nm=` + encodeURIComponent(query) + `&_type=json`;
         } else {
@@ -929,7 +933,6 @@
             content.className = isAllStopped ? 'custom-marker stopped' : (group.isDummy ? 'custom-marker dummy' : 'custom-marker');
             
             let badge = '';
-            // 🛑 대리님 요청: 마커 아이콘 완전 제거, 텍스트만 표시
             if (group.isDummy) {
                 badge = `<span style="background:#eee; color:#777; padding:1px 4px; border-radius:4px; margin-left:4px; font-size:10.5px;">스캔대기</span>`;
                 content.innerHTML = `<span>${group.buildingName}</span>` + badge;
@@ -975,7 +978,6 @@
         document.getElementById('bottomSheet').classList.add('active');
         map.panTo(new kakao.maps.LatLng(groupData.lat - 0.002, groupData.lng));
 
-        // 🛸 광역 스캔으로 생성된 껍데기 마커를 클릭했을 때 데이터 즉시 다운로드 (비동기 처리)
         if (groupData.isDummy) {
             listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ 정부 서버에서 상세 정보를 수집 중입니다...<br><span style="font-size:12px; font-weight:normal; color:#666;">(잠시만 기다려주세요)</span></div>';
             await hydrateDummyGroup(groupData, new AbortController().signal);
@@ -1014,7 +1016,6 @@
             listContainer.innerHTML += tableHtml;
         });
 
-        // 비동기 병렬 캐시 상태 업데이트 (0초 로딩)
         let markerNeedsUpdate = false;
         const fetchPromises = groupData.elevators.map(async (elv) => {
             if (elv.scanned) return; 
@@ -1052,7 +1053,6 @@
 
     function closeBottomSheet() { document.getElementById('bottomSheet').classList.remove('active'); }
 
-    // 뷰포트 레이더 백그라운드 스캐너
     async function startBackgroundSync() {
         if (backgroundSyncController) backgroundSyncController.abort();
         backgroundSyncController = new AbortController(); const signal = backgroundSyncController.signal;
@@ -1060,32 +1060,25 @@
         while (!signal.aborted) {
             let targetGroup = null; let targetElv = null; const bounds = map.getBounds();
 
-            // 1순위: 내 화면(뷰포트) 안쪽 데이터부터 우선 스캔
             for (let group of globalGroups) {
                 if (group.lat && group.lng && bounds.contain(new kakao.maps.LatLng(group.lat, group.lng))) {
                     if (group.isDummy) { targetGroup = group; break; }
                     targetElv = group.elevators.find(e => !e.scanned); if (targetElv) { targetGroup = group; break; }
                 }
             }
-            // 2순위: 화면 밖 데이터
             if (!targetGroup) {
                 for (let group of globalGroups) {
                     if (group.isDummy) { targetGroup = group; break; }
                     targetElv = group.elevators.find(e => !e.scanned); if (targetElv) { targetGroup = group; break; }
                 }
             }
-
             if (!targetGroup) { await new Promise(r => setTimeout(r, 2000)); continue; }
 
-            // 🛸 껍데기 마커라면 공공데이터를 찔러 데이터를 채워 넣음
             if (targetGroup.isDummy) {
                 await hydrateDummyGroup(targetGroup, signal);
-                renderData(true);
-                await new Promise(r => setTimeout(r, 100));
-                continue;
+                renderData(true); await new Promise(r => setTimeout(r, 100)); continue;
             }
 
-            // 개별 승강기 실시간 상태 체크
             try {
                 const safeElevatorNo = String(targetElv.elevatorNo).trim().padStart(7, '0');
                 const res = await fetch(`/api/realtime-status?elevatorNo=${safeElevatorNo}`, { signal });
