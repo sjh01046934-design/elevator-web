@@ -41,6 +41,7 @@
         .item-tag { font-size: 10px; background: #edf2f7; color: #4a5568; padding: 2px 6px; border-radius: 4px; display:inline-block; width: fit-content; }
         .item-delete { color: #ccc; padding: 4px 0 4px 12px; font-size: 14px; }
         
+        /* 버튼 위치 상향 조정 (80px -> 130px) */
         .fab-container { position: absolute; bottom: calc(130px + env(safe-area-inset-bottom, 0px)); right: 16px; display: flex; flex-direction: column; gap: 10px; z-index: 9; }
         .fab-btn { background: white; border: 1px solid #dcdcdc; padding: 10px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.15); cursor: pointer; color: #1e4e79; transition: background 0.2s; text-align: center; }
         .fab-btn:active { background: #f0f0f0; }
@@ -123,7 +124,7 @@
                 <option value="address">도로명/지번</option>
             </select>
 
-            <input type="text" id="searchInput" placeholder="검색어 입력" autocomplete="off" 
+            <input type="text" id="searchInput" placeholder="검색어 입력 (예: 첫마을 1단지)" autocomplete="off" 
                    onfocus="handleInputFocus()" onclick="handleInputFocus()" onkeypress="handleKeyPress(event)">
             
             <span class="icon-clear" onclick="fastClearSearch(event)">X</span>
@@ -186,15 +187,12 @@
     let geocodeCache = new Map(); 
 
     let currentAbortController = null; 
+    let backgroundSyncController = null; // 백그라운드 레이더 스캐너 제어용
 
     function getDbSido(sido) {
         const map = {
-            "충북": "충청북도",
-            "충남": "충청남도",
-            "전북": "전라북도",
-            "전남": "전라남도",
-            "경북": "경상북도",
-            "경남": "경상남도"
+            "충북": "충청북도", "충남": "충청남도", "전북": "전라북도",
+            "전남": "전라남도", "경북": "경상북도", "경남": "경상남도"
         };
         return map[sido] || sido;
     }
@@ -209,9 +207,7 @@
         places = new kakao.maps.services.Places(); 
 
         clusterer = new kakao.maps.MarkerClusterer({
-            map: map,
-            averageCenter: true,
-            minLevel: 7 
+            map: map, averageCenter: true, minLevel: 7 
         });
 
         kakao.maps.event.addListener(clusterer, 'clusterclick', function(cluster) {
@@ -246,7 +242,6 @@
                         const sidoMap = {"서울특별시":"서울","부산광역시":"부산","대구광역시":"대구","인천광역시":"인천","광주광역시":"광주","대전광역시":"대전","울산광역시":"울산","세종특별자치시":"세종","경기도":"경기","강원특별자치도":"강원","충청북도":"충북","충청남도":"충남","전라북도":"전북","전북특별자치도":"전북","전라남도":"전남","경상북도":"경북","경상남도":"경남","제주특별자치도":"제주"};
                         let rawSido = result[0].address.region_1depth_name;
                         document.getElementById('sidoSelector').value = sidoMap[rawSido] || rawSido.substring(0,2);
-                        
                         executeBroadSearch(); 
                     } else {
                         hideLoadingMsg();
@@ -302,19 +297,21 @@
         if (currentAbortController) {
             currentAbortController.abort();
             currentAbortController = null;
-            hideLoadingMsg();
         }
+        if (backgroundSyncController) {
+            backgroundSyncController.abort();
+            backgroundSyncController = null;
+        }
+        hideLoadingMsg();
     }
 
     function fastSearch(event, sido, query, type) {
         if (event) { event.preventDefault(); event.stopPropagation(); }
-        
         document.getElementById('sidoSelector').value = sido;
         document.getElementById('searchInput').value = query;
         if (type) document.getElementById('searchType').value = type;
         document.getElementById('searchDropdown').style.display = 'none'; 
         document.getElementById('searchInput').blur(); 
-        
         if(type === 'place') searchKakaoPlaces();
         else executeBroadSearch(); 
     }
@@ -331,7 +328,6 @@
         if (event) event.preventDefault();
         document.getElementById('searchDropdown').style.display = 'none';
         document.getElementById('searchInput').blur();
-        
         const searchType = document.getElementById('searchType').value;
         if (searchType === 'place') searchKakaoPlaces();
         else executeBroadSearch();
@@ -349,9 +345,7 @@
     }
 
     function handleKeyPress(e) { 
-        if (e.key === 'Enter') { 
-            fastExecute(e); 
-        } 
+        if (e.key === 'Enter') fastExecute(e); 
     }
 
     function renderRecentSearches() {
@@ -363,10 +357,7 @@
         recents.forEach((item, index) => {
             const div = document.createElement('div');
             div.className = 'dropdown-item';
-            let typeLabel = '주소';
-            if(item.type === 'place') typeLabel = '상호/장소';
-            else if(item.type === 'building') typeLabel = '건물/아파트';
-
+            let typeLabel = item.type === 'place' ? '상호/장소' : (item.type === 'building' ? '건물/아파트' : '주소');
             div.innerHTML = `
                 <div class="item-text" onclick="fastSearch(event, '${item.sido}', '${item.query}', '${item.type}')">
                     <div><span class="item-tag">${item.sido} | ${typeLabel}</span></div>
@@ -392,23 +383,16 @@
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
-    // =========================================================
-    // ★ [모드 1] 상호/장소 카카오 리스트업 & 일괄 주소 검색
-    // =========================================================
     function searchKakaoPlaces() {
         const query = document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
-        
-        closeDropdown();
-        closeBottomSheet();
+        closeDropdown(); closeBottomSheet();
 
         if (query === '') { alert("상호명이나 장소를 입력해주세요."); return; }
-
         saveRecentSearch(sido, query);
         showLoadingMsg(`⏳ [${query}] 장소를 찾는 중입니다...`);
 
         const searchKeyword = sido === '전국' ? query : `${sido} ${query}`;
-
         places.keywordSearch(searchKeyword, function(result, status) {
             hideLoadingMsg();
             if (status === kakao.maps.services.Status.OK) {
@@ -430,11 +414,7 @@
             const displayAddr = place.road_address_name || place.address_name;
             if (displayAddr) {
                 let words = displayAddr.split(' ');
-                if (words.length > 1) {
-                    addressList.push(words.slice(1).join(' '));
-                } else {
-                    addressList.push(displayAddr);
-                }
+                addressList.push(words.length > 1 ? words.slice(1).join(' ') : displayAddr);
             }
         });
         
@@ -450,13 +430,11 @@
             const div = document.createElement('div');
             div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
-            
             let searchKeyword = displayAddr;
             if (displayAddr) {
                 let words = displayAddr.split(' ');
                 searchKeyword = words.length > 1 ? words.slice(1).join(' ') : displayAddr;
             }
-
             div.innerHTML = `
                 <div class="item-text" onclick="document.getElementById('searchInput').value='${place.place_name}'; fetchExactElevator(event, '${searchKeyword}')">
                     <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
@@ -469,15 +447,12 @@
     }
 
     async function executeMultiAddressSearch(addresses, placeName) {
-        closeDropdown();
-        closeBottomSheet();
-        cancelSearch(); 
+        closeDropdown(); closeBottomSheet(); cancelSearch(); 
         currentAbortController = new AbortController();
         const signal = currentAbortController.signal;
 
         showLoadingMsg(`⏳ [${placeName}] 여러 지점을 동시에 가져오는 중...`);
         const sido = document.getElementById('sidoSelector').value; 
-        
         const dbSido = getDbSido(sido);
         
         lastQuery = placeName; 
@@ -491,20 +466,16 @@
             );
 
             const results = await Promise.all(fetchPromises);
-            
             const uniqueMap = new Map();
             results.flat().forEach(apiItem => {
                 const elvNo = apiItem.승강기고유번호 || apiItem.elevatorNo || apiItem.elevator_no;
                 if (elvNo && !uniqueMap.has(elvNo)) {
-                    if (!apiItem.customBuldNm) {
-                        apiItem.customBuldNm = `${apiItem.건물명 || apiItem.buldNm || "건물명 없음"} [${placeName}]`;
-                    }
+                    if (!apiItem.customBuldNm) apiItem.customBuldNm = `${apiItem.건물명 || apiItem.buldNm || "건물명 없음"} [${placeName}]`;
                     uniqueMap.set(elvNo, apiItem);
                 }
             });
 
             let data = Array.from(uniqueMap.values());
-
             allElevatorsData = data.filter(apiItem => {
                 const type = String(apiItem.승강기종류 || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
@@ -514,33 +485,24 @@
             currentAbortController = null;
 
             if (allElevatorsData.length === 0) {
-                alert(`해당 조건으로 등록된 승객용 승강기를 찾을 수 없습니다.`);
-                return;
+                alert(`해당 조건으로 등록된 승객용 승강기를 찾을 수 없습니다.`); return;
             }
-
             buildGlobalGroups();
 
         } catch (error) {
             currentAbortController = null;
-            if (error.name !== 'AbortError') {
-                console.error(error);
-                hideLoadingMsg();
-                alert("서버 통신 에러가 발생했습니다.");
-            }
+            if (error.name !== 'AbortError') { hideLoadingMsg(); alert("서버 통신 에러가 발생했습니다."); }
         }
     }
 
     async function fetchExactElevator(event, targetKeyword) {
         if (event) { event.preventDefault(); event.stopPropagation(); }
-        
-        closeDropdown();
-        cancelSearch(); 
+        closeDropdown(); cancelSearch(); 
         currentAbortController = new AbortController();
         const signal = currentAbortController.signal;
 
         showLoadingMsg(`⏳ 승강기 정보 실시간 조회 중...`);
         const sido = document.getElementById('sidoSelector').value; 
-        
         const dbSido = getDbSido(sido);
         let refinedKeyword = targetKeyword;
 
@@ -561,35 +523,20 @@
             currentAbortController = null;
 
             if (allElevatorsData.length === 0) {
-                alert(`해당 장소에 등록된 승강기가 없거나, 다른 지역입니다.\n(왼쪽 위 시/도 선택이 올바른지 확인해 주세요)`);
-                return;
+                alert(`해당 장소에 등록된 승강기가 없거나, 다른 지역입니다.`); return;
             }
-
             buildGlobalGroups();
 
         } catch (error) {
             currentAbortController = null;
-            if (error.name === 'AbortError') {
-                console.log("핀포인트 검색 취소됨");
-            } else {
-                console.error(error);
-                hideLoadingMsg();
-                alert("서버 통신 에러가 발생했습니다.");
-            }
+            if (error.name !== 'AbortError') { hideLoadingMsg(); alert("서버 통신 에러가 발생했습니다."); }
         }
     }
 
-    // =========================================================
-    // ★ [모드 2, 3] 건물명 / 주소 넓은 범위 검색
-    // =========================================================
     async function executeBroadSearch(overrideQuery) {
         const query = overrideQuery || document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
-        const searchType = document.getElementById('searchType').value; 
-        
-        closeDropdown();
-        closeBottomSheet();
-        cancelSearch(); 
+        closeDropdown(); closeBottomSheet(); cancelSearch(); 
         
         currentAbortController = new AbortController();
         const signal = currentAbortController.signal;
@@ -597,7 +544,6 @@
         if (query === '') { alert("검색어를 입력해주세요."); return; }
 
         const dbSido = getDbSido(sido);
-
         allElevatorsData = []; 
         lastQuery = query;
         lastSido = sido;
@@ -608,7 +554,6 @@
         try {
             let response = await fetch(`/api/elevators?keyword=${encodeURIComponent(query)}&sido=${encodeURIComponent(dbSido)}&t=${Date.now()}`, { signal });
             if (!response.ok) throw new Error("서버 응답 오류");
-            
             let data = await response.json();
 
             allElevatorsData = data.filter(apiItem => {
@@ -620,30 +565,18 @@
             currentAbortController = null;
 
             if (allElevatorsData.length === 0) {
-                alert(`[${sido}] 지역에서 해당 조건으로 검색된 승강기가 없습니다.`);
-                return;
+                alert(`[${sido}] 지역에서 해당 조건으로 검색된 승강기가 없습니다.`); return;
             }
-
             buildGlobalGroups();
 
         } catch (error) {
             currentAbortController = null;
-            if (error.name === 'AbortError') {
-                console.log("검색 취소됨");
-            } else {
-                console.error(error);
-                hideLoadingMsg();
-                alert("서버 통신 에러가 발생했습니다.");
-            }
+            if (error.name !== 'AbortError') { hideLoadingMsg(); alert("서버 통신 에러가 발생했습니다."); }
         }
     }
 
-    // =========================================================
-    // ★ UI 랜더링 (마커 및 바텀시트 연동)
-    // =========================================================
     function buildGlobalGroups() {
         const groupedMap = new Map();
-        
         const uiKeyword = document.getElementById('searchInput').value.trim();
         const searchType = document.getElementById('searchType').value;
 
@@ -659,17 +592,15 @@
 
             if (!groupedMap.has(key)) {
                 groupedMap.set(key, {
-                    buildingName: buldNm,
-                    address: address,
+                    buildingName: buldNm, address: address,
                     lat: parseFloat(apiItem.위도 || apiItem.gpsLati || apiItem.gps_lati) || null,
                     lng: parseFloat(apiItem.경도 || apiItem.gpsLong || apiItem.gps_long) || null,
                     elevators: []
                 });
             }
 
-            // 백엔드가 제공하는 '실시간운행상태' 변수를 최우선 판별 기준으로 삼습니다.
             const stts = String(apiItem.elvtrStts || "상태불명").trim();
-            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지'));
+            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐기'));
             
             const rawType = String(apiItem.승강기종류 || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
             let refinedType = "승객용"; 
@@ -695,34 +626,29 @@
             if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
             groupedMap.get(key).elevators.push({
-    elevatorNo: apiItem.승강기고유번호 || apiItem.elevatorNo || apiItem.elevator_no || "번호 미상",
-    type: refinedType,
-    speed: finalSpeed,
-    floors: apiItem.운행층수 || apiItem.shuttleSection || apiItem.shuttle_section || "-",
-    weight: finalWeight,
-    capacity: finalCapacity,
-    installPlace: String(apiItem.설치위치 || apiItem.installationPlace || apiItem.installation_place || "-").trim(),
-    state: stts, 
-    isOperating: isOperating
-});
+                elevatorNo: apiItem.승강기고유번호 || apiItem.elevatorNo || apiItem.elevator_no || "번호 미상",
+                type: refinedType, speed: finalSpeed,
+                floors: apiItem.운행층수 || apiItem.shuttleSection || apiItem.shuttle_section || "-",
+                weight: finalWeight, capacity: finalCapacity,
+                installPlace: String(apiItem.설치위치 || apiItem.installationPlace || apiItem.installation_place || "-").trim(),
+                state: stts, isOperating: isOperating
+            });
         });
 
         globalGroups = Array.from(groupedMap.values());
-
         showLoadingMsg("📍 지도에 정확한 위치를 표시하는 중...");
+
         Promise.all(globalGroups.map(group => {
             return new Promise((resolve) => {
                 if (group.address === "-" || group.address === "주소 없음") { resolve(); return; } 
                 if (geocodeCache.has(group.address)) {
                     const coords = geocodeCache.get(group.address);
-                    group.lat = coords.lat;
-                    group.lng = coords.lng;
+                    group.lat = coords.lat; group.lng = coords.lng;
                     resolve(); return;
                 }
                 geocoder.addressSearch(group.address, function(result, status) {
                     if (status === kakao.maps.services.Status.OK) {
-                        group.lat = parseFloat(result[0].y);
-                        group.lng = parseFloat(result[0].x);
+                        group.lat = parseFloat(result[0].y); group.lng = parseFloat(result[0].x);
                         geocodeCache.set(group.address, {lat: group.lat, lng: group.lng});
                     }
                     resolve();
@@ -731,10 +657,11 @@
         })).then(() => {
             hideLoadingMsg();
             renderData();
+            startBackgroundSync(); // 스캔 가동!
         });
     }
 
-    function renderData() {
+    function renderData(isBackgroundUpdate = false) {
         let renderList = [...globalGroups];
 
         const queryLower = lastQuery.replace(/\s+/g, '').toLowerCase();
@@ -745,11 +672,9 @@
             if (name === queryLower) score += 1000;
             else if (name.startsWith(queryLower)) score += 500;
             else if (name.includes(queryLower)) score += 100;
-            
             if (addr === queryLower) score += 1000;
             else if (addr.startsWith(queryLower)) score += 500;
             else if (addr.includes(queryLower)) score += 100;
-            
             score -= name.length;
             return score;
         };
@@ -763,28 +688,25 @@
         renderList.forEach(group => {
             if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
 
-            // 건물 안의 멈춘 엘리베이터 개수 연산
-            const stoppedCount = group.elevators.filter(e => e.state.includes('중지') || e.state.includes('불합격') || e.state.includes('고장')).length;
+            // 휴지, 폐기도 카운트에 완벽 포함
+            const stoppedCount = group.elevators.filter(e => e.state.includes('중지') || e.state.includes('불합격') || e.state.includes('고장') || e.state.includes('휴지') || e.state.includes('폐기')).length;
             const isAllStopped = group.elevators.length > 0 && stoppedCount === group.elevators.length;
             
             const content = document.createElement('div');
             content.className = isAllStopped ? 'custom-marker stopped' : 'custom-marker';
             
-            // 1대라도 정지된 경우 마커 우측에 직관적인 빨간 배지 딱지 부착
             let stopBadge = '';
             if (stoppedCount > 0) {
-                stopBadge = `<span style="background: white; color: #d32f2f; padding: 2px 5px; border-radius: 4px; margin-left: 6px; font-size: 11px; font-weight: 900; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">운행정지 ${stoppedCount}대</span>`;
+                stopBadge = `<span style="background: white; color: #d32f2f; padding: 2px 5px; border-radius: 4px; margin-left: 6px; font-size: 11px; font-weight: 900; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">정지/휴지 ${stoppedCount}대</span>`;
             }
 
             content.innerHTML = markerSvgIcon + `<span>${group.buildingName} (${group.elevators.length}대)</span>` + stopBadge;
-            
             content.onclick = function(event) { 
                 if (event) event.stopPropagation();
                 openBottomSheet(group); 
             };
 
-            let lat = group.lat;
-            let lng = group.lng;
+            let lat = group.lat; let lng = group.lng;
             let coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`;
             let offsetMultiplier = 1;
             
@@ -798,44 +720,71 @@
 
             newOverlays.push(new kakao.maps.CustomOverlay({
                 position: new kakao.maps.LatLng(lat, lng), 
-                content: content,
-                yAnchor: 1,
-                clickable: true 
+                content: content, yAnchor: 1, clickable: true 
             }));
         });
         
         clusterer.addMarkers(newOverlays);
         
-        if (renderList.length === 1) {
-            map.setLevel(5); 
-            setTimeout(() => { map.panTo(new kakao.maps.LatLng(renderList[0].lat, renderList[0].lng)); }, 100);
-        } else if (renderList.length > 1) {
-            let bounds = new kakao.maps.LatLngBounds();
-            newOverlays.forEach(overlay => { bounds.extend(overlay.getPosition()); });
-            setTimeout(() => { map.setBounds(bounds); }, 100);
-        } 
+        // 배경 업데이트 중일 때는 카메라 시점을 강제로 옮기지 않음
+        if (!isBackgroundUpdate) {
+            if (renderList.length === 1) {
+                map.setLevel(5); 
+                setTimeout(() => { map.panTo(new kakao.maps.LatLng(renderList[0].lat, renderList[0].lng)); }, 100);
+            } else if (renderList.length > 1) {
+                let bounds = new kakao.maps.LatLngBounds();
+                newOverlays.forEach(overlay => { bounds.extend(overlay.getPosition()); });
+                setTimeout(() => { map.setBounds(bounds); }, 100);
+            } 
+        }
     }
 
-    function openBottomSheet(groupData) {
+    async function openBottomSheet(groupData) {
         document.getElementById('resBuildingName').innerText = groupData.buildingName;
         document.getElementById('resAddress').innerText = groupData.address;
         document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
-
         document.getElementById('btnRoadview').href = `https://map.kakao.com/link/roadview/${groupData.lat},${groupData.lng}`;
         document.getElementById('btnDirections').href = `https://map.kakao.com/link/to/${encodeURIComponent(groupData.buildingName)},${groupData.lat},${groupData.lng}`;
 
         const listContainer = document.getElementById('elevatorListContainer');
-        listContainer.innerHTML = ''; 
+        listContainer.innerHTML = '<div style="text-align:center; padding: 20px; color:#1e4e79;">⏳ 정부 데이터 실시간 연동 중...</div>'; 
+        
+        document.getElementById('bottomSheet').classList.add('active');
+        map.panTo(new kakao.maps.LatLng(groupData.lat - 0.002, groupData.lng));
 
-        groupData.elevators.forEach((elv, index) => {
-            const stateColor = elv.isOperating ? "#1e4e79" : "#d32f2f";
-            let displayStateText = elv.state;
-            if (elv.isOperating && (elv.state === "합격" || elv.state === "상태불명")) displayStateText = "정상운행";
+        let htmlContent = '';
+        let markerNeedsUpdate = false;
 
-            const tableHtml = `
+        for (let index = 0; index < groupData.elevators.length; index++) {
+            const elv = groupData.elevators[index];
+            let displayStateText = "확인중";
+            let stateColor = "#777";
+            
+            try {
+                const res = await fetch(`/api/realtime-status?elevatorNo=${elv.elevatorNo}`);
+                const data = await res.json();
+                displayStateText = data.status;
+                
+                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기'));
+                stateColor = isOperating ? "#1e4e79" : "#d32f2f";
+                
+                if (isOperating && (displayStateText === "합격" || displayStateText === "상태불명" || displayStateText === "상태알수없음")) {
+                    displayStateText = "정상운행";
+                }
+
+                if (elv.isOperating !== isOperating) {
+                    elv.isOperating = isOperating;
+                    elv.state = displayStateText;
+                    markerNeedsUpdate = true;
+                }
+            } catch(e) {
+                displayStateText = "통신오류";
+            }
+
+            htmlContent += `
                 <div class="elv-item-title">
                     <span>#${index + 1} 호기 <span style="font-weight:normal; color:#777;">(${elv.elevatorNo})</span></span>
-                    <span style="color:${stateColor}; font-size:12px;">[${displayStateText}]</span>
+                    <span style="color:${stateColor}; font-size:12px; font-weight:900;">[${displayStateText}]</span>
                 </div>
                 <table class="data-table">
                     <tr><th>승강기종류</th><td style="font-weight:bold;">${elv.type}</td><th>운행층수</th><td>${elv.floors}</td></tr>
@@ -846,14 +795,44 @@
                     </tr>
                 </table>
             `;
-            listContainer.innerHTML += tableHtml;
-        });
-
-        document.getElementById('bottomSheet').classList.add('active');
-        map.panTo(new kakao.maps.LatLng(groupData.lat - 0.002, groupData.lng));
+        }
+        
+        listContainer.innerHTML = htmlContent;
+        if (markerNeedsUpdate) renderData(true);
     }
 
     function closeBottomSheet() { document.getElementById('bottomSheet').classList.remove('active'); }
+
+    // 레이더 스캐너 함수
+    async function startBackgroundSync() {
+        if (backgroundSyncController) backgroundSyncController.abort();
+        backgroundSyncController = new AbortController();
+        const signal = backgroundSyncController.signal;
+
+        for (let group of globalGroups) {
+            let groupChanged = false;
+            for (let elv of group.elevators) {
+                if (signal.aborted) return;
+                try {
+                    const res = await fetch(`/api/realtime-status?elevatorNo=${elv.elevatorNo}`, { signal });
+                    const data = await res.json();
+                    const stts = data.status;
+                    
+                    const isOperating = !(stts.includes('정지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐기'));
+                    
+                    if (elv.isOperating !== isOperating) {
+                        elv.isOperating = isOperating;
+                        elv.state = stts;
+                        groupChanged = true;
+                    }
+                } catch(e) {
+                    if (e.name === 'AbortError') return;
+                }
+                await new Promise(r => setTimeout(r, 100)); 
+            }
+            if (groupChanged && !signal.aborted) renderData(true); 
+        }
+    }
 
     window.onload = function() {
         kakao.maps.load(function() { initMap(); });
