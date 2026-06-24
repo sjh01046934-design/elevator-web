@@ -366,37 +366,51 @@
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
-    // 🚀 [초강력 개편] 복합 도로명/지번명 완벽 고립 추출 엔진 (0대 오류 원천 해결)
+
+    // 🔥 [완전 개편: Bulletproof 파싱 모듈] 
+    // "노을3로" 등 숫자가 포함된 도로명을 박살내지 않고 뒤에서부터 안전하게 분리합니다.
     function extractAddressParams(fullAddress) {
-        if (!fullAddress) return { address1: "", address2: "" };
+        if (!fullAddress) return { searchKeyword: "", fullAddress1: "", address2: "" };
         
-        // 1. 행정구역명(시도, 시군구) 전면 청소
-        let clean = fullAddress.replace(/^[가-힣]+(특별자치시|특별시|광역시|도|특별자치도)\s*/g, '');
-        clean = clean.replace(/^[가-힣]+(시|군|구)\s*/g, '');
-        
-        // 2. '장문로12' 연착 방지 강제 공백화
-        clean = clean.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2');
+        let clean = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(특별자치시|특별시|광역시|도|특별자치도)?\s*/, '');
+        clean = clean.replace(/^[가-힣]+(시|군|구)\s+/g, '');
+        clean = clean.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2'); // 장문로12 띄어쓰기 복원
 
         let words = clean.trim().split(/\s+/);
         let numIdx = -1;
 
-        // 3. 가장 처음 등장하는 건물번호/번지수 탐색
-        for (let i = 0; i < words.length; i++) {
-            if (/\d/.test(words[i])) { numIdx = i; break; }
+        // 🚨 반드시 배열의 '뒤'에서부터 번지수(숫자 시작)를 찾아야 복합 도로명이 파괴되지 않습니다.
+        for (let i = words.length - 1; i >= 0; i--) {
+            if (/^\d/.test(words[i])) { 
+                numIdx = i; 
+                break; 
+            }
         }
 
-        let address1 = "";
+        let searchKeyword = "";
+        let fullAddress1 = "";
         let address2 = "";
 
         if (numIdx !== -1) {
             address2 = words[numIdx];
-            // 🔥 핵심: "한솔동 노을3로" 처럼 동명이 앞단에 붙었을 때, 번호 바로 앞 단어("노을3로")만 순수 도로명으로 완벽 고립화!
-            address1 = words[numIdx - 1] || words.slice(0, numIdx).join(" ");
+            let preWords = words.slice(0, numIdx);
+            fullAddress1 = preWords.join(" "); // "한솔동 노을3로" 전체 보존
+            
+            if (preWords.length > 0) {
+                let lastPre = preWords[preWords.length - 1];
+                // "어진로 12번길", "종로 1가" 처럼 두 단어가 한 세트인 도로명 처리
+                if (preWords.length > 1 && (lastPre.endsWith("번길") || lastPre.match(/\d+(가|동)$/))) {
+                    searchKeyword = preWords[preWords.length - 2] + " " + lastPre;
+                } else {
+                    searchKeyword = lastPre; // 순수 도로명(예: "노을3로")만 추출하여 API 검색 효율 극대화
+                }
+            }
         } else {
-            address1 = words.join(" ");
+            searchKeyword = clean;
+            fullAddress1 = clean;
         }
 
-        return { address1: address1.trim(), address2: address2.trim() };
+        return { searchKeyword: searchKeyword.trim(), fullAddress1: fullAddress1.trim(), address2: address2.trim() };
     }
 
     function parseAddressNumber(str) {
@@ -405,21 +419,22 @@
         return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
     }
 
-    // 🚀 [초강력 개편] 양방향 유연 인프라 매칭 필터 (0대 누락 방지 & 오버페칭 완벽 방어)
-    function filterValidElevators(items, roadName, roadNo, dongName, jibunNo) {
+    // 🚀 [초강력 철벽 필터] 293대 폭탄을 막아내는 안전망
+    function filterValidElevators(items, roadKeyword, roadNo, dongKeyword, jibunNo, placeName) {
         if (!items || items.length === 0) return [];
         
-        const rClean = roadName ? roadName.replace(/\s+/g, '').toLowerCase() : "";
-        const dClean = dongName ? dongName.replace(/\s+/g, '').toLowerCase() : "";
+        const rClean = roadKeyword ? roadKeyword.replace(/\s+/g, '').toLowerCase() : "";
+        const dClean = dongKeyword ? dongKeyword.replace(/\s+/g, '').toLowerCase() : "";
         const rNum = parseAddressNumber(roadNo);
         const jNum = parseAddressNumber(jibunNo);
+        const pClean = placeName ? placeName.replace(/\s+/g, '').toLowerCase() : "";
 
-        return items.filter(item => {
+        let validItems = items.filter(item => {
             let addr1 = String(item.address1 || item.address || "");
             let addr2 = String(item.address2 || "");
             let fullStr = (addr1 + " " + addr2).replace(/\s+/g, '').toLowerCase();
+            let bName = String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase();
 
-            // 본번지 정밀 식별 서브 클로저
             const matchNumber = (targetNum) => {
                 if (!targetNum) return false;
                 let numRegex = new RegExp(`(?:^|[^0-9])${targetNum.main}(?:[^0-9]|$)`);
@@ -431,36 +446,58 @@
                 return true;
             };
 
-            // 1차 안전망: 공공데이터 내 도로명 텍스트 포함 및 건물번호 일치 여부
+            // 1. 도로명 일치 검증
             if (rClean && fullStr.includes(rClean) && matchNumber(rNum)) return true;
             
-            // 2차 안전망: 공공데이터 내 동/리 명칭 포함 및 본번지 일치 여부 (지번 등록 매장 상호 구제)
+            // 2. 지번(동) 일치 검증 (도로명이 없는 구형 주소 커버)
             if (dClean && fullStr.includes(dClean) && matchNumber(jNum)) return true;
+            
+            // 3. 상호명(건물명) 백업 방어: 백업으로 긁어온 경우 최소한 동네(도로명/동이름)는 일치해야만 허용 (폭탄 방지)
+            if (pClean && bName && (bName.includes(pClean) || pClean.includes(bName))) {
+                 if (rClean && fullStr.includes(rClean)) return true;
+                 if (dClean && fullStr.includes(dClean)) return true;
+            }
 
             return false;
         });
+
+        // 🚨 최후의 보루: 서브번호 불일치로 0대가 뜰 경우, 메인 건물번호만으로 자비롭게 구제 (단, 도로는 무조건 일치해야 함)
+        if (validItems.length === 0 && (rNum || jNum)) {
+            validItems = items.filter(item => {
+                let addr1 = String(item.address1 || item.address || "");
+                let addr2 = String(item.address2 || "");
+                let fullStr = (addr1 + " " + addr2).replace(/\s+/g, '').toLowerCase();
+                
+                let mainRMatch = rClean && fullStr.includes(rClean) && rNum && new RegExp(`(?:^|[^0-9])${rNum.main}(?:[^0-9]|$)`).test(addr1 + " " + addr2);
+                let mainJMatch = dClean && fullStr.includes(dClean) && jNum && new RegExp(`(?:^|[^0-9])${jNum.main}(?:[^0-9]|$)`).test(addr1 + " " + addr2);
+                
+                return mainRMatch || mainJMatch;
+            });
+        }
+        
+        return validItems;
     }
 
-    // 🚀 [개편] 듀얼 어드레스 파이프라인 동기화 엔진
+    // 🚀 [API 호출 듀얼 파이프라인 엔진]
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
         const rParams = extractAddressParams(roadAddr);
         const jParams = extractAddressParams(jibunAddr);
         
         let combinedItems = [];
         
-        // 도로명이 존재할 경우 우선 호출
-        if (rParams.address1) {
-            combinedItems = await requestPublicElevatorList(apiSido, rParams.address1, signal);
+        // 1. 완벽 고립된 도로명 키워드로 1차 스캔
+        if (rParams.searchKeyword) {
+            combinedItems = await requestPublicElevatorList(apiSido, rParams.searchKeyword, signal);
         }
-        // 도로명 데이터가 없거나 지번 동명 코드가 불일치할 경우 교차 스캔 보강
-        if (combinedItems.length === 0 && jParams.address1 && jParams.address1 !== rParams.address1) {
-            combinedItems = await requestPublicElevatorList(apiSido, jParams.address1, signal);
+        // 2. 검색 실패 시 지번 법정동 키워드로 2차 스캔 교차 보완
+        if (combinedItems.length === 0 && jParams.searchKeyword && jParams.searchKeyword !== rParams.searchKeyword) {
+            combinedItems = await requestPublicElevatorList(apiSido, jParams.searchKeyword, signal);
         }
 
-        // 새롭게 조율된 유연 매칭 시스템 작동
-        let validItems = filterValidElevators(combinedItems, rParams.address1, rParams.address2, jParams.address1, jParams.address2);
+        // 철벽 필터 가동
+        let validItems = filterValidElevators(combinedItems, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2, placeName);
 
-        // 상호명 기반 백업 루틴
+        // 🛑 [최종 상호명 백업] 주소 기반이 완전히 빗나갔을 때만 가동
         if (validItems.length === 0 && placeName) {
             try {
                 let cleanBuldNm = placeName.split(/\s+/)[0]; 
@@ -471,8 +508,8 @@
                     let backupItems = dataBackup.response?.body?.items?.item || [];
                     if (!Array.isArray(backupItems)) backupItems = [backupItems];
                     
-                    // 백업 데이터 유입 시에도 가차 없이 타겟 주소와 매칭되는 내역만 사수 (스타벅스 폭탄 완전 해결)
-                    validItems = filterValidElevators(backupItems, rParams.address1, rParams.address2, jParams.address1, jParams.address2);
+                    // 백업 데이터를 무지성으로 뿌리지 않고 안전망에 한 번 더 통과시킵니다.
+                    validItems = filterValidElevators(backupItems, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2, cleanBuldNm);
                 }
             } catch (e) { console.error("Backup fetch error:", e); }
         }
@@ -566,6 +603,7 @@
         placesResult.forEach(place => {
             const div = document.createElement('div'); div.className = 'dropdown-item';
             const displayAddr = place.road_address_name || place.address_name;
+            // 양방향 주소 파라미터 안전 주입
             div.innerHTML = `
                 <div class="item-text" onmousedown="fetchExactElevator(event, '${place.place_name}', '${place.road_address_name || ""}', '${place.address_name || ""}')" ontouchstart="fetchExactElevator(event, '${place.place_name}', '${place.road_address_name || ""}', '${place.address_name || ""}')">
                     <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
@@ -782,7 +820,7 @@
             baseApiUrl += `&buld_nm=` + encodeURIComponent(query) + `&_type=json`;
         } else {
             const params = extractAddressParams(query);
-            baseApiUrl += `&address1=` + encodeURIComponent(params.address1);
+            baseApiUrl += `&address1=` + encodeURIComponent(params.searchKeyword);
             baseApiUrl += `&_type=json`;
         }
 
@@ -822,7 +860,7 @@
                     return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
                 } else {
                     const params = extractAddressParams(query);
-                    return filterValidElevators([item], params.address1, params.address2, params.address1, params.address2).length > 0;
+                    return filterValidElevators([item], params.searchKeyword, params.address2, params.searchKeyword, params.address2, "").length > 0;
                 }
             });
 
