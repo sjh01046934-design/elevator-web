@@ -72,7 +72,6 @@
         .data-table th { background-color: #f8fafc; color: #444; font-weight: bold; width: 20%; }
         .data-table td { font-weight: 500; color: #111; width: 30%; }
         
-        /* 마커 스타일 고도화 (승강기 없음 처리 추가) */
         .custom-marker { background-color: #1e4e79; color: white; padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; box-shadow: 0 3px 6px rgba(0,0,0,0.3); position: relative; white-space: nowrap; cursor: pointer; bottom: 20px; display: flex; align-items: center; gap: 4px; border: 1px solid rgba(255,255,255,0.4); transition: transform 0.1s; letter-spacing: -0.5px;}
         .custom-marker:active { transform: scale(0.95); }
         .custom-marker::after { content: ''; position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%); border-width: 5px 5px 0; border-style: solid; border-color: #1e4e79 transparent; display: block; width: 0; }
@@ -195,7 +194,6 @@
     const DEPLOY_CONFIG = { CLOUDFLARE_WORKER_URL: 'https://wild-river-017e.sjh01046934.workers.dev/?url=' };
     const API_CONFIG = { SERVICE_KEY: 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d', BASE_URL: 'https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM' };
     
-    // 🔥 공공데이터 서버 연동을 위한 완벽한 행정구역 풀네임 변환기
     const FULL_SIDO_MAP = {
         "서울": "서울특별시", "부산": "부산광역시", "대구": "대구광역시", "인천": "인천광역시",
         "광주": "광주광역시", "대전": "대전광역시", "울산": "울산광역시", "세종": "세종특별자치시",
@@ -368,12 +366,37 @@
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
-    // 🚀 [핵심] 유연한 주소 매핑을 위한 유틸리티 함수
+    // 🚀 [핵심 추가] 복합 도로명 분리 및 시도/시군구 제거를 위한 고도화 파싱 유틸리티
+    function extractAddressParams(fullAddress) {
+        let cleanAddr = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(특별자치시|특별시|광역시|도|특별자치도)?\s*/, '');
+        cleanAddr = cleanAddr.replace(/^[가-힣]+(시|군|구)\s+/, '');
+
+        let words = cleanAddr.trim().split(/\s+/);
+        let targetAddress1 = "";
+        let targetAddress2 = "";
+
+        let numIdx = -1;
+        for (let i = words.length - 1; i >= 0; i--) {
+            if (/\d/.test(words[i])) { numIdx = i; break; }
+        }
+
+        if (numIdx !== -1) {
+            targetAddress2 = words[numIdx];
+            targetAddress1 = words.slice(0, numIdx).join(" ");
+        } else {
+            targetAddress1 = cleanAddr;
+        }
+
+        if (!targetAddress1 && words.length > 0) targetAddress1 = words[0];
+        return { address1: targetAddress1, address2: targetAddress2 };
+    }
+
     function parseAddressNumber(str) {
         if (!str) return null;
         let match = str.match(/([0-9]+)(?:-([0-9]+))?/);
         return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
     }
+
     function extractAddressNumber(fullAddr, roadName) {
         if (!roadName || !fullAddr) return null;
         const escapedRoad = roadName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -381,29 +404,97 @@
         return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
     }
 
-    // 데이터 누락을 막는 철벽 필터링 모듈
+    // 🚀 데이터 누락을 막는 철벽 유연 필터링 모듈 리팩토링
     function filterValidElevators(items, targetAddress1, targetAddress2) {
+        if (!items || items.length === 0) return [];
         const targetNum = parseAddressNumber(targetAddress2);
+        const t1Clean = targetAddress1.replace(/\s+/g, '').toLowerCase();
+
         let validItems = items.filter(item => {
-            let fullStr = (String(item.address1 || item.address || "") + " " + String(item.address2 || "")).trim();
-            if (!fullStr.includes(targetAddress1)) return false;
-            let apiNum = extractAddressNumber(fullStr, targetAddress1);
-            if (targetNum && apiNum) return (targetNum.main === apiNum.main) && (targetNum.sub === apiNum.sub);
+            let fullStr = (String(item.address1 || item.address || "") + " " + String(item.address2 || "")).replace(/\s+/g, '').toLowerCase();
+            if (!fullStr.includes(t1Clean)) return false;
+
             if (targetNum) {
-                if (!new RegExp("\\b" + targetNum.main + "\\b").test(fullStr)) return false;
-                if (targetNum.sub > 0) return new RegExp("\\b" + targetNum.main + "-" + targetNum.sub + "\\b").test(fullStr);
-                return !new RegExp("\\b" + targetNum.main + "-[1-9]").test(fullStr);
+                let apiNum = extractAddressNumber(fullStr, targetAddress1);
+                if (apiNum) return (targetNum.main === apiNum.main) && (targetNum.sub === apiNum.sub);
+                return fullStr.includes(String(targetNum.main));
             }
-            return fullStr.includes(targetAddress2);
+            return true;
         });
 
-        // 🚨 최후의 보루: 깐깐한 정규식이 실패해도, 도로명과 본번지가 포함되어 있으면 합격 처리 (0대 방지용)
+        // 🚨 최후의 보루: 주소 포맷 미스매칭 시 본번 매칭 우선 구제 로직
         if (validItems.length === 0 && targetNum) {
             validItems = items.filter(item => {
                 let fullStr = (String(item.address1 || item.address || "") + " " + String(item.address2 || "")).trim();
-                return fullStr.includes(targetAddress1) && fullStr.includes(String(targetNum.main));
+                return fullStr.includes(String(targetNum.main));
             });
         }
+        return validItems;
+    }
+
+    // 🚀 [공통 데이터 호출 & 상호명 백업 파이프라인 엔진]
+    async function fetchElevatorDataByAddressOrBuilding(apiSido, addr, placeName, signal) {
+        const params = extractAddressParams(addr);
+        const targetAddress1 = params.address1;
+        const targetAddress2 = params.address2;
+
+        const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
+        let combinedItems = [];
+        
+        try {
+            let resFirst = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
+            if (resFirst.ok) {
+                let dataFirst = await resFirst.json();
+                let totalCount = dataFirst.response?.body?.totalCount || 0;
+                let items = dataFirst.response?.body?.items?.item || [];
+                if (!Array.isArray(items)) items = [items];
+                combinedItems.push(...items);
+
+                let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
+                if (maxPages > 1) {
+                    let fetchPromises = [];
+                    for (let p = 2; p <= maxPages; p++) {
+                        fetchPromises.push(
+                            fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal })
+                            .then(r => r.ok ? r.json() : null).catch(() => null)
+                        );
+                    }
+                    let results = await Promise.all(fetchPromises);
+                    results.forEach(resData => {
+                        if (resData && resData.response?.body?.items?.item) {
+                            let itms = resData.response.body.items.item;
+                            if (!Array.isArray(itms)) itms = [itms];
+                            combinedItems.push(...itms);
+                        }
+                    });
+                }
+            }
+        } catch (e) { console.error("Address fetch error:", e); }
+
+        let validItems = filterValidElevators(combinedItems, targetAddress1, targetAddress2);
+
+        // 🛑 [크리티컬 백업 가동] 주소 매핑으로 0대 검출 시 건물명(상호명) 파라미터 백업 스캔 시도
+        if (validItems.length === 0 && placeName) {
+            try {
+                // 상호명 뒤 지점명 분리 정제 (예: 스타벅스 세종어반점 -> 스타벅스)
+                let cleanBuldNm = placeName.split(/\s+/)[0]; 
+                const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
+                let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
+                if (resBackup.ok) {
+                    let dataBackup = await resBackup.json();
+                    let backupItems = dataBackup.response?.body?.items?.item || [];
+                    if (!Array.isArray(backupItems)) backupItems = [backupItems];
+                    
+                    // 백업 데이터 중 해당 구역 동/로가 맞는지 느슨한 교차 매핑 유효성 필터링
+                    validItems = backupItems.filter(item => {
+                        let itemFullStr = (String(item.address1 || item.address || "")).replace(/\s+/g, '');
+                        return itemFullStr.includes(targetAddress1.substring(0, 3)) || (targetNum && itemFullStr.includes(String(targetNum.main)));
+                    });
+                    if(validItems.length === 0) validItems = backupItems; // 차선책 보루
+                }
+            } catch (e) { console.error("Backup building fetch error:", e); }
+        }
+
         return validItems;
     }
 
@@ -517,105 +608,56 @@
         startBackgroundSync(); 
     }
 
-    // 🛸 광역스캔 마커용 데이터 하이드레이션 (페이지네이션 추가)
     async function hydrateDummyGroup(group, signal) {
         const sido = document.getElementById('sidoSelector').value; 
         const apiSido = FULL_SIDO_MAP[sido] || sido;
         
-        let targetAddress1 = ""; let targetAddress2 = "";
-        let words = group.address.trim().split(/\s+/);
-        for (let i = words.length - 1; i >= 0; i--) {
-            if (/\d/.test(words[i])) { targetAddress2 = words[i]; targetAddress1 = (i > 0) ? words[i - 1] : words[i]; break; }
-        }
-        if (!targetAddress2) {
-            if (words.length >= 2) { targetAddress2 = words.pop(); targetAddress1 = words.pop(); } 
-            else { targetAddress1 = group.address; }
-        }
+        let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, group.address, group.buildingName, signal);
 
-        const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
-        try {
-            let items = [];
-            let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
-            if (!res.ok) throw new Error();
-            let data = await res.json();
-            
-            let fetchedItems = data.response?.body?.items?.item || [];
-            if (!Array.isArray(fetchedItems)) fetchedItems = [fetchedItems];
-            items.push(...fetchedItems);
+        const uniqueMap = new Map();
+        validItems.forEach(item => {
+            const elvNo = item.elevatorNo || item.elevator_no;
+            if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item);
+        });
 
-            let totalCount = data.response?.body?.totalCount || 0;
-            let maxPages = Math.min(Math.ceil(totalCount / 500), 5); 
-            if (maxPages > 1) {
-                let fetchPromises = [];
-                for (let p = 2; p <= maxPages; p++) {
-                    fetchPromises.push(
-                        fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal }).then(r=>r.ok?r.json():null).catch(()=>null)
-                    );
-                }
-                let results = await Promise.all(fetchPromises);
-                results.forEach(pRes => {
-                    if (pRes && pRes.response?.body?.items?.item) {
-                        let pItems = pRes.response.body.items.item;
-                        if (!Array.isArray(pItems)) pItems = [pItems];
-                        items.push(...pItems);
-                    }
-                });
-            }
+        let elevs = Array.from(uniqueMap.values()).filter(apiItem => {
+            const type = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
+            return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
+        });
 
-            // 철벽 유연 매핑 적용
-            let validItems = filterValidElevators(items, targetAddress1, targetAddress2);
+        group.elevators = elevs.map(apiItem => {
+            const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
+            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지'));
+            const rawType = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
+            if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
+            else if (rawType.includes("에스컬레이터")) refinedType = "에스컬레이터";
+            else if (rawType.includes("무빙워크")) refinedType = "무빙워크";
+            else if (rawType.includes("수직") && rawType.includes("휠체어")) refinedType = "수직형휠체어리프트";
+            else if (rawType.includes("경사") && rawType.includes("휠체어")) refinedType = "경사형휠체어리프트";
+            else if (rawType.includes("장애인")) refinedType = "장애인용";
+            else if (rawType.includes("소방") || rawType.includes("구조") || rawType.includes("비상")) refinedType = "소방구조용";
+            else if (rawType.includes("화물") && rawType.includes("승객")) refinedType = "승객화물용";
+            else if (rawType.includes("병원") || rawType.includes("침대")) refinedType = "병원용";
 
-            const uniqueMap = new Map();
-            validItems.forEach(item => {
-                const elvNo = item.elevatorNo || item.elevator_no;
-                if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item);
-            });
+            let weightNum = String(apiItem.liveLoad || apiItem.live_load || "").replace(/[^0-9]/g, ""); 
+            let finalWeight = weightNum ? weightNum + " kg" : "-";
+            let speedNum = String(apiItem.ratedSpeed || apiItem.rated_speed || "").replace(/[^0-9.]/g, "");
+            let finalSpeed = speedNum ? speedNum + " m/min" : "-";
+            let capNum = String(apiItem.prsonCnt || apiItem.personCnt || apiItem.person_cnt || "").replace(/[^0-9]/g, "");
+            let finalCapacity = "-";
+            if (capNum && parseInt(capNum) > 0) finalCapacity = parseInt(capNum) + "명";
+            else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
+            if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
-            let elevs = Array.from(uniqueMap.values()).filter(apiItem => {
-                const type = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
-                return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
-            });
-
-            group.elevators = elevs.map(apiItem => {
-                const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
-                const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지'));
-                const rawType = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
-                if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
-                else if (rawType.includes("에스컬레이터")) refinedType = "에스컬레이터";
-                else if (rawType.includes("무빙워크")) refinedType = "무빙워크";
-                else if (rawType.includes("수직") && rawType.includes("휠체어")) refinedType = "수직형휠체어리프트";
-                else if (rawType.includes("경사") && rawType.includes("휠체어")) refinedType = "경사형휠체어리프트";
-                else if (rawType.includes("장애인")) refinedType = "장애인용";
-                else if (rawType.includes("소방") || rawType.includes("구조") || rawType.includes("비상")) refinedType = "소방구조용";
-                else if (rawType.includes("화물") && rawType.includes("승객")) refinedType = "승객화물용";
-                else if (rawType.includes("병원") || rawType.includes("침대")) refinedType = "병원용";
-
-                let weightNum = String(apiItem.liveLoad || apiItem.live_load || "").replace(/[^0-9]/g, ""); 
-                let finalWeight = weightNum ? weightNum + " kg" : "-";
-                let speedNum = String(apiItem.ratedSpeed || apiItem.rated_speed || "").replace(/[^0-9.]/g, "");
-                let finalSpeed = speedNum ? speedNum + " m/min" : "-";
-                let capNum = String(apiItem.prsonCnt || apiItem.personCnt || apiItem.person_cnt || "").replace(/[^0-9]/g, "");
-                let finalCapacity = "-";
-                if (capNum && parseInt(capNum) > 0) finalCapacity = parseInt(capNum) + "명";
-                else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
-                if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
-
-                return {
-                    elevatorNo: apiItem.elevatorNo || apiItem.elevator_no || "번호 미상",
-                    type: refinedType, speed: finalSpeed, floors: apiItem.shuttleSection || apiItem.shuttle_section || "-",
-                    weight: finalWeight, capacity: finalCapacity, installPlace: String(apiItem.installationPlace || apiItem.installation_place || "-").trim(),
-                    state: stts, isOperating: isOperating, scanned: false 
-                };
-            });
-            group.isDummy = false;
-            // 0대 검출시 아예 회색 마커(승강기없음)로 변환
-            if (group.elevators.length === 0) group.noElevator = true;
-
-        } catch(e) { 
-            group.isDummy = false; 
-            group.elevators = [];
-            group.noElevator = true; 
-        }
+            return {
+                elevatorNo: apiItem.elevatorNo || apiItem.elevator_no || "번호 미상",
+                type: refinedType, speed: finalSpeed, floors: apiItem.shuttleSection || apiItem.shuttle_section || "-",
+                weight: finalWeight, capacity: finalCapacity, installPlace: String(apiItem.installationPlace || apiItem.installation_place || "-").trim(),
+                state: stts, isOperating: isOperating, scanned: false 
+            };
+        });
+        group.isDummy = false;
+        if (group.elevators.length === 0) group.noElevator = true;
     }
 
     async function executeMultiAddressSearch(event, addresses, placeName) {
@@ -634,44 +676,7 @@
 
         try {
             const fetchPromises = addresses.map(async (addr) => {
-                let targetAddress1 = ""; let targetAddress2 = "";
-                let words = addr.trim().split(/\s+/);
-                
-                for (let i = words.length - 1; i >= 0; i--) {
-                    if (/\d/.test(words[i])) { targetAddress2 = words[i]; targetAddress1 = (i > 0) ? words[i - 1] : words[i]; break; }
-                }
-                if (!targetAddress2) {
-                    if (words.length >= 2) { targetAddress2 = words.pop(); targetAddress1 = words.pop(); } 
-                    else { targetAddress1 = addr; }
-                }
-
-                const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
-                
-                try {
-                    let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
-                    if (!res.ok) return [];
-                    let data = await res.json();
-                    let items = data.response?.body?.items?.item || [];
-                    if (!Array.isArray(items)) items = [items];
-
-                    let totalCount = data.response?.body?.totalCount || 0;
-                    let maxPages = Math.min(Math.ceil(totalCount / 500), 5);
-                    
-                    if (maxPages > 1) {
-                        for (let p = 2; p <= maxPages; p++) {
-                            let pRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal }).then(r=>r.ok?r.json():null).catch(()=>null);
-                            if (pRes && pRes.response?.body?.items?.item) {
-                                let pItems = pRes.response.body.items.item;
-                                if (!Array.isArray(pItems)) pItems = [pItems];
-                                items.push(...pItems);
-                            }
-                        }
-                    }
-
-                    // 철벽 유연 매핑 적용
-                    let validItems = filterValidElevators(items, targetAddress1, targetAddress2);
-                    return validItems;
-                } catch(e) { return []; }
+                return await fetchElevatorDataByAddressOrBuilding(apiSido, addr, placeName, signal);
             });
 
             const results = await Promise.all(fetchPromises);
@@ -716,49 +721,7 @@
             const sido = document.getElementById('sidoSelector').value; 
             const apiSido = FULL_SIDO_MAP[sido] || sido;
 
-            let targetAddress1 = ""; let targetAddress2 = "";
-            let words = address.trim().split(/\s+/);
-            for (let i = words.length - 1; i >= 0; i--) {
-                if (/\d/.test(words[i])) { targetAddress2 = words[i]; targetAddress1 = (i > 0) ? words[i - 1] : words[i]; break; }
-            }
-            if (!targetAddress2) {
-                if (words.length >= 2) { targetAddress2 = words.pop(); targetAddress1 = words.pop(); } 
-                else { targetAddress1 = address; }
-            }
-
-            const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(targetAddress1)}&_type=json`;
-            let resFirst = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
-            if (!resFirst.ok) throw new Error("서버 응답 오류");
-            
-            let dataFirst = await resFirst.json();
-            let combinedItems = []; let totalCount = dataFirst.response?.body?.totalCount || 0;
-            let items = dataFirst.response?.body?.items?.item || [];
-            if (!Array.isArray(items)) items = [items];
-            combinedItems.push(...items);
-
-            let maxPages = Math.min(Math.ceil(totalCount / 500), 30); 
-            if (maxPages > 1) {
-                showLoadingMsg(`⏳ 상세 데이터 동기화 중...`);
-                let fetchPromises = [];
-                for (let p = 2; p <= maxPages; p++) { fetchPromises.push(p); }
-                for (let i = 0; i < fetchPromises.length; i += 3) {
-                    let batch = fetchPromises.slice(i, i + 3);
-                    let batchRequests = batch.map(p => 
-                        fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal }).then(r => r.ok ? r.json() : null).catch(e => null)
-                    );
-                    let results = await Promise.all(batchRequests);
-                    results.forEach(resData => {
-                        if (resData && resData.response?.body?.items?.item) {
-                            let itms = resData.response?.body?.items?.item;
-                            if (!Array.isArray(itms)) itms = [itms]; combinedItems.push(...itms);
-                        }
-                    });
-                    await new Promise(r => setTimeout(r, 200)); 
-                }
-            }
-            
-            // 철벽 유연 매핑 적용
-            let validItems = filterValidElevators(combinedItems, targetAddress1, targetAddress2);
+            let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, address, placeName, signal);
 
             const uniqueMap = new Map();
             validItems.forEach(item => {
@@ -802,14 +765,9 @@
         if (searchType === 'building') {
             baseApiUrl += `&buld_nm=` + encodeURIComponent(query) + `&_type=json`;
         } else {
-            let targetAddress1 = ""; let targetAddress2 = ""; let words = query.trim().split(/\s+/);
-            if (words.length >= 2) { targetAddress2 = words.pop(); targetAddress1 = words.join(" "); } 
-            else {
-                let match = query.match(/([가-힣]+[a-zA-Z0-9]*[길로동읍면])([0-9]+.*)/);
-                if (match) { targetAddress1 = match[1]; targetAddress2 = match[2]; } else { targetAddress1 = query; }
-            }
-            baseApiUrl += `&address1=` + encodeURIComponent(targetAddress1);
-            if (targetAddress2) baseApiUrl += `&address2=` + encodeURIComponent(targetAddress2);
+            const params = extractAddressParams(query);
+            baseApiUrl += `&address1=` + encodeURIComponent(params.address1);
+            if (params.address2) baseApiUrl += `&address2=` + encodeURIComponent(params.address2);
             baseApiUrl += `&_type=json`;
         }
 
@@ -956,7 +914,6 @@
             
             const content = document.createElement('div');
             
-            // 🛑 진짜 승강기가 없는 단층 건물이면 회색 뱃지로 처리
             if (group.noElevator) {
                 content.className = 'custom-marker no-elv';
                 content.innerHTML = `<span>${group.buildingName} (승강기없음)</span>`;
