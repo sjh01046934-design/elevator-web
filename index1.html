@@ -142,11 +142,8 @@
         <div class="info-card">
             <div class="card-header">
                 <div class="elevator-icon-box">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1e4e79" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
-                        <line x1="12" y1="22" x2="12" y2="2"></line>
-                        <polyline points="8 6 12 2 16 6"></polyline>
-                        <polyline points="8 18 12 22 16 18"></polyline>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="#1e4e79">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-8.5 6c.83 0 1.5-.67 1.5-1.5S11.33 6 10.5 6 9 6.67 9 7.5 9.67 9 10.5 9zm-2 8H7v-4.5H5.5v-3c0-.83.67-1.5 1.5-1.5h7c.83 0 1.5.67 1.5 1.5v3H14V17h-1.5v-4.5h-4V17zm7-7l-2.5-2.5L14 9h3v1.5zM14 15l2.5 2.5L19 15h-3v-1.5z"/>
                     </svg>
                 </div>
                 <div>
@@ -193,7 +190,7 @@
     // Cloudflare Worker 주소
     const DEPLOY_CONFIG = { CLOUDFLARE_WORKER_URL: 'https://wild-river-017e.sjh01046934.workers.dev/?url=' };
     const API_CONFIG = { SERVICE_KEY: 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d', BASE_URL: 'https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM' };
-    const markerSvgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V1zm1.5 1v12h9V2h-9zM5.5 4h1v8h-1V4zm4 0h1v8h-1V4z"/></svg>`;
+    const markerSvgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 24 24" style="margin-right: 4px; margin-bottom: -2px;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-8.5 6c.83 0 1.5-.67 1.5-1.5S11.33 6 10.5 6 9 6.67 9 7.5 9.67 9 10.5 9zm-2 8H7v-4.5H5.5v-3c0-.83.67-1.5 1.5-1.5h7c.83 0 1.5.67 1.5 1.5v3H14V17h-1.5v-4.5h-4V17zm7-7l-2.5-2.5L14 9h3v1.5zM14 15l2.5 2.5L19 15h-3v-1.5z"/></svg>`;
 
     function initMap() {
         const container = document.getElementById('map');
