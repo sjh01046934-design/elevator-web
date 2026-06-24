@@ -600,7 +600,7 @@
             }
 
             const stts = String(apiItem.elvtrStts || "상태불명").trim();
-            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐기'));
+            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐지') || stts.includes('검사연기'));
             
             const rawType = String(apiItem.승강기종류 || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
             let refinedType = "승객용"; 
@@ -765,7 +765,7 @@
                 const data = await res.json();
                 displayStateText = data.status;
                 
-                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기'));
+                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐지') || displayStateText.includes('검사연기'));
                 stateColor = isOperating ? "#1e4e79" : "#d32f2f";
                 
                 if (isOperating && (displayStateText === "합격" || displayStateText === "상태불명" || displayStateText === "상태알수없음")) {
@@ -818,7 +818,7 @@
                     const data = await res.json();
                     const stts = data.status;
                     
-                    const isOperating = !(stts.includes('정지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐기'));
+                    const isOperating = !(stts.includes('정지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐지') || stts.includes('검사연기'));
                     
                     if (elv.isOperating !== isOperating) {
                         elv.isOperating = isOperating;
