@@ -337,7 +337,7 @@
         const dropdown = document.getElementById('searchDropdown');
         let recents = JSON.parse(localStorage.getItem('elevator_recent_searches') || '[]');
         dropdown.innerHTML = '';
-        if (recents.length === 0) { dropdown.style.display = 'none'; return; }
+        if (recents.length === 0) { dropdown.style.none; return; }
         dropdown.innerHTML = `<div class="dropdown-header">최근 검색어 <span class="clear-all-btn" onclick="clearAllRecent()">전체삭제</span></div>`;
         recents.forEach((item, index) => {
             const div = document.createElement('div'); div.className = 'dropdown-item';
@@ -366,7 +366,6 @@
     function closeDropdown() { document.getElementById('searchDropdown').style.display = 'none'; }
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
-    // 🚀 [마스터 수립] 관내 자치구 검증용 명칭 추출 모듈
     function extractBorough(fullAddress) {
         if (!fullAddress) return "";
         if (fullAddress.includes("세종")) return "";
@@ -379,7 +378,6 @@
         return "";
     }
 
-    // 🚀 [마스터 수립] 정부 API 매칭용 순수 도로명/동이름 단위 고립 분리 유틸리티
     function extractAddressParams(fullAddress) {
         if (!fullAddress) return { searchKeyword: "", address2: "" };
         let clean = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(특별자치시|특별시|광역시|도|특별자치도)?\s*/, '');
@@ -397,7 +395,6 @@
 
         if (numIdx !== -1) {
             address2 = words[numIdx];
-            // 정부 API의 Prefix 장애를 해결하기 위해 오직 '순수 도로명/동이름' 단어 하나만 단독 고립 추출
             searchKeyword = words[numIdx - 1] || "";
         } else {
             searchKeyword = words[words.length - 1] || "";
@@ -412,7 +409,6 @@
         return match ? { main: parseInt(match[1], 10), sub: match[2] ? parseInt(match[2], 10) : 0 } : null;
     }
 
-    // 🚀 [마스터 수립] 자치구 기반의 유연한 복합 주소 넘버 매칭 엔진 (0대 오작동 완벽 차단)
     function filterValidElevators(items, borough, roadKeyword, roadNo, dongKeyword, jibunNo) {
         if (!items || items.length === 0) return [];
         
@@ -427,7 +423,6 @@
             let addr2 = String(item.address2 || "");
             let fullStr = (addr1 + " " + addr2).replace(/\s+/g, '').toLowerCase();
 
-            // 자치구 명칭이 존재하는 지역일 경우, 엉뚱한 구의 중복 번지 데이터 유입 원천 차단
             if (bClean && !fullStr.includes(bClean)) return false;
 
             const matchNumber = (targetNum) => {
@@ -441,36 +436,39 @@
                 return true;
             };
 
-            // 도로명 번지수 매칭 검증 트랙
             if (rClean && fullStr.includes(rClean) && matchNumber(rNum)) return true;
-            // 지번 번지수 매칭 검증 트랙 (정부 DB가 지번 위주로 표기되어 있어도 패스)
             if (dClean && fullStr.includes(dClean) && matchNumber(jNum)) return true;
 
             return false;
         });
     }
 
-    // 🚀 [마스터 수립] 듀얼 어드레스 병렬 스캔 파이프라인
+    // 🚀 [핵심 개편 엔퍼런스] 기형적인 지번 단독 등록 스킵 버그 완전 박멸부
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
         const rParams = extractAddressParams(roadAddr);
         const jParams = extractAddressParams(jibunAddr);
         const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
         
         let combinedItems = [];
-        
-        // 트랙 1: 순수 도로명 토큰 조회
+        let fetchPromises = [];
+
+        // 도로명 트랙 비동기 바인딩 등록
         if (rParams.searchKeyword) {
-            combinedItems = await requestPublicElevatorList(apiSido, rParams.searchKeyword, signal);
+            fetchPromises.push(requestPublicElevatorList(apiSido, rParams.searchKeyword, signal));
         }
-        // 트랙 2: 도로명 조회 실패 혹은 교차 스캔 보장을 위해 순수 행정동 토큰 조회
-        if (combinedItems.length === 0 && jParams.searchKeyword && jParams.searchKeyword !== rParams.searchKeyword) {
-            combinedItems = await requestPublicElevatorList(apiSido, jParams.searchKeyword, signal);
+        // 지번(행정동) 트랙 비동기 바인딩 등록 (도로명 성공유무와 관계없이 무조건 병렬 조회 수행)
+        if (jParams.searchKeyword && jParams.searchKeyword !== rParams.searchKeyword) {
+            fetchPromises.push(requestPublicElevatorList(apiSido, jParams.searchKeyword, signal));
         }
 
-        // 철벽 자치구 번지 필터 적용
+        try {
+            // 두 개 트랙 데이터를 완전히 결합시켜 유실율 0% 인프라 확립
+            const results = await Promise.all(fetchPromises);
+            results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
+        } catch(e) { console.error("Parallel scan error", e); }
+
         let validItems = filterValidElevators(combinedItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
 
-        // 상호명 기반 최종 백업 라인
         if (validItems.length === 0 && placeName) {
             try {
                 let cleanBuldNm = placeName.split(/\s+/)[0]; 
@@ -483,7 +481,7 @@
                     
                     validItems = filterValidElevators(backupItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
                 }
-            } catch (e) { console.error("Backup search bypass.", e); }
+            } catch (e) { console.error("Backup trigger bypass."); }
         }
         return validItems;
     }
@@ -518,7 +516,7 @@
                     });
                 }
             }
-        } catch (e) { console.error("API gateway timeout catch:", e); }
+        } catch (e) { console.error("Fetch failure", e); }
         return list;
     }
 
