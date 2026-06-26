@@ -466,8 +466,8 @@ async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr
             const { data, err } = await supabaseClient
                 .from('elevators_raw')
                 .select('*')
-                .ilike('address1', `%${rParams.searchKeyword}%`)
-                .ilike('address1', `%${rParams.address2}%`);
+                .ilike('건물주소', `%${rParams.searchKeyword}%`)
+                .ilike('건물주소', `%${rParams.address2}%`);
                 
             if (data && data.length > 0) dbItems = data;
             error = err;
@@ -478,8 +478,8 @@ async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr
             const { data, err } = await supabaseClient
                 .from('elevators_raw')
                 .select('*')
-                .ilike('address1', `%${jParams.searchKeyword}%`)
-                .ilike('address1', `%${jParams.address2}%`);
+                .ilike('건물주소', `%${jParams.searchKeyword}%`)
+                .ilike('건물주소', `%${jParams.address2}%`);
                 
             if (data && data.length > 0) dbItems = data;
             if (!error) error = err;
