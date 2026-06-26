@@ -192,7 +192,7 @@
     let currentAbortController = null; 
     let backgroundSyncController = null;
 
-    // 🚀 [자바스크립트 변수 충돌 해결부] 글로벌 window 객체의 supabase 모듈을 안전하게 바인딩
+    // 수파베이스 접속 초기화 환경 설정
     const SUPABASE_URL = 'https://your-supabase-url.supabase.co'; 
     const SUPABASE_KEY = 'your-supabase-anon-key';
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -449,39 +449,77 @@
         });
     }
 
-    // 🚀 [수파베이스 바인딩 수정부] 충돌 없이 안전하게 데이터 Select 처리
+    // 주소 표기 및 전국 단위 중복 명칭 격리를 보완한 수파베이스 부분 일치 다중 키워드 매핑 기능
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
-        showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
+        showLoadingMsg(`⏳ Supabase 자산 DB에서 지역 맞춤 매핑 정보 조회 중...`);
         
         try {
-            const cleanRoadAddr = roadAddr ? roadAddr.trim() : "";
-            const cleanJibunAddr = jibunAddr ? jibunAddr.trim() : "";
+            const rParams = extractAddressParams(roadAddr);
+            const jParams = extractAddressParams(jibunAddr);
+            const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
+            const shortSido = apiSido ? apiSido.substring(0, 2) : "";
+            
+            let dbItems = [];
+            let error = null;
 
-            const { data: dbItems, error } = await supabaseClient
-                .from('elevator_list') 
-                .select('*')
-                .or(`address1.eq."${cleanRoadAddr}",address1.eq."${cleanJibunAddr}",address2.eq."${cleanRoadAddr}",address2.eq."${cleanJibunAddr}"`);
+            // 1차 트랙: 도로명 조건에 시도 및 시군구 필터를 조합 연동하여 쿼리
+            if (rParams.searchKeyword && rParams.address2) {
+                let query = supabaseClient
+                    .from('elevator_list')
+                    .select('*')
+                    .ilike('address1', `%${shortSido}%`)
+                    .ilike('address1', `%${rParams.searchKeyword}%`)
+                    .ilike('address1', `%${rParams.address2}%`);
+                    
+                if (borough) {
+                    query = query.ilike('address1', `%${borough}%`);
+                }
+
+                const { data, err } = await query;
+                if (data && data.length > 0) dbItems = data;
+                error = err;
+            }
+            
+            // 2차 레이어: 지번 데이터 백업 검사 수행
+            if (dbItems.length === 0 && jParams.searchKeyword && jParams.address2) {
+                let query = supabaseClient
+                    .from('elevator_list')
+                    .select('*')
+                    .ilike('address1', `%${shortSido}%`)
+                    .ilike('address1', `%${jParams.searchKeyword}%`)
+                    .ilike('address1', `%${jParams.address2}%`);
+                    
+                if (borough) {
+                    query = query.ilike('address1', `%${borough}%`);
+                }
+
+                const { data, err } = await query;
+                if (data && data.length > 0) dbItems = data;
+                if (!error) error = err;
+            }
 
             if (!error && dbItems && dbItems.length > 0) {
-                console.log("Supabase DB 데이터 로드 완료:", dbItems);
-                return dbItems; 
+                console.log("Supabase 지역 타겟팅 매핑 성공:", dbItems);
+                let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
+                if (validDbItems.length > 0) return validDbItems;
             }
         } catch (supabaseError) {
             console.error("Supabase Database 접근 실패. 기존 공공데이터 레일 백업 전환 수행.", supabaseError);
         }
 
-        const rParams = extractAddressParams(roadAddr);
-        const jParams = extractAddressParams(jibunAddr);
-        const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
+        // 이하 수파베이스 데이터 미존재 시 구동되는 하이브리드 공공포털 Fallback 연동 인프라
+        const rParamsFallback = extractAddressParams(roadAddr);
+        const jParamsFallback = extractAddressParams(jibunAddr);
+        const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
         
         let combinedItems = [];
         let fetchPromises = [];
 
-        if (rParams.searchKeyword) {
-            fetchPromises.push(requestPublicElevatorList(apiSido, rParams.searchKeyword, signal));
+        if (rParamsFallback.searchKeyword) {
+            fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
         }
-        if (jParams.searchKeyword && jParams.searchKeyword !== rParams.searchKeyword) {
-            fetchPromises.push(requestPublicElevatorList(apiSido, jParams.searchKeyword, signal));
+        if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
+            fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
         }
 
         try {
@@ -489,7 +527,7 @@
             results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
         } catch(e) { console.error("Parallel scan error", e); }
 
-        let validItems = filterValidElevators(combinedItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
+        let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
 
         if (validItems.length === 0 && placeName) {
             try {
@@ -501,7 +539,7 @@
                     let backupItems = dataBackup.response?.body?.items?.item || [];
                     if (!Array.isArray(backupItems)) backupItems = [backupItems];
                     
-                    validItems = filterValidElevators(backupItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
+                    validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
                 }
             } catch (e) { console.error("Backup trigger bypass."); }
         }
@@ -652,11 +690,21 @@
         startBackgroundSync(); 
     }
 
+    // 데이터 스캔 완료 및 백그라운드 파싱 완료 시 상호명 뒤에 [건물명]을 동적으로 바인딩하는 로직
     async function hydrateDummyGroup(group, signal) {
         const sido = document.getElementById('sidoSelector').value; 
         const apiSido = FULL_SIDO_MAP[sido] || sido;
         
         let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, group.roadAddress || group.address, group.jibunAddress || group.address, group.buildingName, signal);
+
+        // 로드된 레코드셋의 실건물명을 상호라벨 뒤에 [건물명] 구조로 결합
+        if (validItems && validItems.length > 0) {
+            let firstItem = validItems[0];
+            let origBuldNm = String(firstItem.buldNm || firstItem.buld_nm || "").trim();
+            if (origBuldNm && origBuldNm !== "null" && !origBuldNm.includes("없음") && !group.buildingName.includes(origBuldNm)) {
+                group.buildingName = `${group.buildingName} [${origBuldNm}]`;
+            }
+        }
 
         const uniqueMap = new Map();
         validItems.forEach(item => {
@@ -999,6 +1047,7 @@
         }
     }
 
+    // 바텀시트 스크롤 영역 최상단 내에 건물명 명칭 보드를 결합하도록 고도화 완료
     async function openBottomSheet(groupData) {
         document.getElementById('resBuildingName').innerText = groupData.buildingName;
         document.getElementById('resAddress').innerText = groupData.address;
@@ -1028,7 +1077,9 @@
             }
         }
 
-        listContainer.innerHTML = ''; 
+        // 최상단 영역에 실건물명 정보 헤더 바 동적 가공 처리
+        let listHtml = `<div style="font-size: 13.5px; font-weight: bold; color: #1e4e79; margin: 4px 0 12px 0; background: #f0f4f8; padding: 8px 10px; border-radius: 6px; border-left: 4px solid #1e4e79; word-break: break-all;">🏢 ${groupData.buildingName}</div>`;
+
         groupData.elevators.forEach((elv, index) => {
             const initialText = elv.scanned ? elv.state : "조회중...⏳";
             const initialColor = elv.scanned ? (elv.isOperating ? "#1e4e79" : "#d32f2f") : "#777";
@@ -1052,8 +1103,10 @@
                     </tr>
                 </table>
             `;
-            listContainer.innerHTML += tableHtml;
+            listHtml += tableHtml;
         });
+
+        listContainer.innerHTML = listHtml;
 
         let markerNeedsUpdate = false;
         const fetchPromises = groupData.elevators.map(async (elv) => {
