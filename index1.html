@@ -192,10 +192,10 @@
     let currentAbortController = null; 
     let backgroundSyncController = null;
 
-    // Supabase 자산 접속 설정 환경
+    // 🚀 [자바스크립트 변수 충돌 해결부] 글로벌 window 객체의 supabase 모듈을 안전하게 바인딩
     const SUPABASE_URL = 'https://your-supabase-url.supabase.co'; 
     const SUPABASE_KEY = 'your-supabase-anon-key';
-    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const DEPLOY_CONFIG = { CLOUDFLARE_WORKER_URL: 'https://wild-river-017e.sjh01046934.workers.dev/?url=' };
     const API_CONFIG = { SERVICE_KEY: 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d', BASE_URL: 'https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM' };
@@ -449,30 +449,27 @@
         });
     }
 
-    // 🚀 [수파베이스 우선 연동 핵심 로직] 카카오에서 검색된 건물 주소로 Supabase DB의 승강기 목록 우선 조회
+    // 🚀 [수파베이스 바인딩 수정부] 충돌 없이 안전하게 데이터 Select 처리
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
         showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
         
         try {
-            // 주소 파라미터 클렌징
             const cleanRoadAddr = roadAddr ? roadAddr.trim() : "";
             const cleanJibunAddr = jibunAddr ? jibunAddr.trim() : "";
 
-            // Supabase 매핑 테이블에서 도로명주소 또는 지번주소 조건으로 데이터 Select
-            const { data: dbItems, error } = await supabase
-                .from('elevator_list') // 설계하신 Supabase 테이블명 적용
+            const { data: dbItems, error } = await supabaseClient
+                .from('elevator_list') 
                 .select('*')
                 .or(`address1.eq."${cleanRoadAddr}",address1.eq."${cleanJibunAddr}",address2.eq."${cleanRoadAddr}",address2.eq."${cleanJibunAddr}"`);
 
             if (!error && dbItems && dbItems.length > 0) {
                 console.log("Supabase DB 데이터 로드 완료:", dbItems);
-                return dbItems; // 매핑된 DB 데이터 우선 반환으로 유실율 0% 및 실시간 속도 확보
+                return dbItems; 
             }
         } catch (supabaseError) {
             console.error("Supabase Database 접근 실패. 기존 공공데이터 레일 백업 전환 수행.", supabaseError);
         }
 
-        // 💡 Supabase DB에 매핑 주소가 없을 경우 기존의 공공데이터 인프라를 백업 트랙(Fallback)으로 유지하여 안정성 구축
         const rParams = extractAddressParams(roadAddr);
         const jParams = extractAddressParams(jibunAddr);
         const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
@@ -1063,7 +1060,6 @@
             if (elv.scanned) return; 
             
             try {
-                // 🚀 [실시간 상태 맵핑] Supabase DB의 고유번호 규격 안정화 후 공공데이터 상태만 파싱
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
                 const res = await fetch(`/api/realtime-status?elevatorNo=${safeElevatorNo}`);
                 const data = await res.json();
