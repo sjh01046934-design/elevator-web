@@ -492,7 +492,7 @@ async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr
     } catch (supabaseError) {
         // Supabase에서 에러가 나도 아래 공공데이터 Fallback으로 넘어가도록 조용히 로그만 남김
         console.warn("Supabase 스캔 생략/실패 (Fallback 전환):", supabaseError.message);
-    }
+    };
 
     // --- 이하 기존 공공데이터 Fallback 유지 (완벽합니다) ---
     // ... (기존 코드와 동일)
