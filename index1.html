@@ -6,6 +6,7 @@
     <title>승강기 지도 - 승강기 설치유무검색서비스</title>
     
     <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=59f58919246c9ac3780496fc7e2c0d74&libraries=services,clusterer&autoload=false"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -190,6 +191,11 @@
 
     let currentAbortController = null; 
     let backgroundSyncController = null;
+
+    // Supabase 자산 접속 설정 환경
+    const SUPABASE_URL = 'https://your-supabase-url.supabase.co'; 
+    const SUPABASE_KEY = 'your-supabase-anon-key';
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const DEPLOY_CONFIG = { CLOUDFLARE_WORKER_URL: 'https://wild-river-017e.sjh01046934.workers.dev/?url=' };
     const API_CONFIG = { SERVICE_KEY: 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d', BASE_URL: 'https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM' };
@@ -443,8 +449,30 @@
         });
     }
 
-    // 🚀 [핵심 개편 엔퍼런스] 기형적인 지번 단독 등록 스킵 버그 완전 박멸부
+    // 🚀 [수파베이스 우선 연동 핵심 로직] 카카오에서 검색된 건물 주소로 Supabase DB의 승강기 목록 우선 조회
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
+        showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
+        
+        try {
+            // 주소 파라미터 클렌징
+            const cleanRoadAddr = roadAddr ? roadAddr.trim() : "";
+            const cleanJibunAddr = jibunAddr ? jibunAddr.trim() : "";
+
+            // Supabase 매핑 테이블에서 도로명주소 또는 지번주소 조건으로 데이터 Select
+            const { data: dbItems, error } = await supabase
+                .from('elevator_list') // 설계하신 Supabase 테이블명 적용
+                .select('*')
+                .or(`address1.eq."${cleanRoadAddr}",address1.eq."${cleanJibunAddr}",address2.eq."${cleanRoadAddr}",address2.eq."${cleanJibunAddr}"`);
+
+            if (!error && dbItems && dbItems.length > 0) {
+                console.log("Supabase DB 데이터 로드 완료:", dbItems);
+                return dbItems; // 매핑된 DB 데이터 우선 반환으로 유실율 0% 및 실시간 속도 확보
+            }
+        } catch (supabaseError) {
+            console.error("Supabase Database 접근 실패. 기존 공공데이터 레일 백업 전환 수행.", supabaseError);
+        }
+
+        // 💡 Supabase DB에 매핑 주소가 없을 경우 기존의 공공데이터 인프라를 백업 트랙(Fallback)으로 유지하여 안정성 구축
         const rParams = extractAddressParams(roadAddr);
         const jParams = extractAddressParams(jibunAddr);
         const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
@@ -452,17 +480,14 @@
         let combinedItems = [];
         let fetchPromises = [];
 
-        // 도로명 트랙 비동기 바인딩 등록
         if (rParams.searchKeyword) {
             fetchPromises.push(requestPublicElevatorList(apiSido, rParams.searchKeyword, signal));
         }
-        // 지번(행정동) 트랙 비동기 바인딩 등록 (도로명 성공유무와 관계없이 무조건 병렬 조회 수행)
         if (jParams.searchKeyword && jParams.searchKeyword !== rParams.searchKeyword) {
             fetchPromises.push(requestPublicElevatorList(apiSido, jParams.searchKeyword, signal));
         }
 
         try {
-            // 두 개 트랙 데이터를 완전히 결합시켜 유실율 0% 인프라 확립
             const results = await Promise.all(fetchPromises);
             results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
         } catch(e) { console.error("Parallel scan error", e); }
@@ -996,7 +1021,7 @@
         document.getElementById('resTotalCount').innerText = groupData.isDummy ? "(스캔 대기중...)" : `(${groupData.elevators.length}대)`;
 
         if (groupData.isDummy) {
-            listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ 정부 서버에서 상세 정보를 수집 중입니다...<br><span style="font-size:12px; font-weight:normal; color:#666;">(잠시만 기다려주세요)</span></div>';
+            listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ Supabase 및 정부 실시간 상태 수집 중...<br><span style="font-size:12px; font-weight:normal; color:#666;">(잠시만 기다려주세요)</span></div>';
             await hydrateDummyGroup(groupData, new AbortController().signal);
             renderData(true); 
             document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
@@ -1038,6 +1063,7 @@
             if (elv.scanned) return; 
             
             try {
+                // 🚀 [실시간 상태 맵핑] Supabase DB의 고유번호 규격 안정화 후 공공데이터 상태만 파싱
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
                 const res = await fetch(`/api/realtime-status?elevatorNo=${safeElevatorNo}`);
                 const data = await res.json();
