@@ -464,7 +464,7 @@ async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr
         // 1차: 시도/시군구를 쿼리에서 빼고 '능동로', '90' 핵심 키워드로만 1차 와일드카드 추출
         if (rParams.searchKeyword && rParams.address2) {
             const { data, err } = await supabaseClient
-                .from('elevators_raws')
+                .from('elevators_raw')
                 .select('*')
                 .ilike('address1', `%${rParams.searchKeyword}%`)
                 .ilike('address1', `%${rParams.address2}%`);
@@ -476,7 +476,7 @@ async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr
         // 2차: 지번 탐색 백업
         if (dbItems.length === 0 && jParams.searchKeyword && jParams.address2) {
             const { data, err } = await supabaseClient
-                .from('elevators_raws')
+                .from('elevators_raw')
                 .select('*')
                 .ilike('address1', `%${jParams.searchKeyword}%`)
                 .ilike('address1', `%${jParams.address2}%`);
