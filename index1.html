@@ -449,102 +449,93 @@
         });
     }
 
-    // 주소 표기 및 전국 단위 중복 명칭 격리를 보완한 수파베이스 부분 일치 다중 키워드 매핑 기능
-    async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
-        showLoadingMsg(`⏳ Supabase 자산 DB에서 지역 맞춤 매핑 정보 조회 중...`);
+    // 🚀 [수파베이스 쿼리 간소화] 행정구역 명칭 차이로 인한 누락을 막기 위해 핵심 키워드만으로 와일드카드 조회
+async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
+    showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
+    
+    try {
+        const rParams = extractAddressParams(roadAddr);
+        const jParams = extractAddressParams(jibunAddr);
+        const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
         
-        try {
-            const rParams = extractAddressParams(roadAddr);
-            const jParams = extractAddressParams(jibunAddr);
-            const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
-            const shortSido = apiSido ? apiSido.substring(0, 2) : "";
-            
-            let dbItems = [];
-            let error = null;
+        let dbItems = [];
+        let error = null;
 
-            // 1차 트랙: 도로명 조건에 시도 및 시군구 필터를 조합 연동하여 쿼리
-            if (rParams.searchKeyword && rParams.address2) {
-                let query = supabaseClient
-                    .from('elevator_list')
-                    .select('*')
-                    .ilike('address1', `%${shortSido}%`)
-                    .ilike('address1', `%${rParams.searchKeyword}%`)
-                    .ilike('address1', `%${rParams.address2}%`);
-                    
-                if (borough) {
-                    query = query.ilike('address1', `%${borough}%`);
-                }
-
-                const { data, err } = await query;
-                if (data && data.length > 0) dbItems = data;
-                error = err;
-            }
-            
-            // 2차 레이어: 지번 데이터 백업 검사 수행
-            if (dbItems.length === 0 && jParams.searchKeyword && jParams.address2) {
-                let query = supabaseClient
-                    .from('elevator_list')
-                    .select('*')
-                    .ilike('address1', `%${shortSido}%`)
-                    .ilike('address1', `%${jParams.searchKeyword}%`)
-                    .ilike('address1', `%${jParams.address2}%`);
-                    
-                if (borough) {
-                    query = query.ilike('address1', `%${borough}%`);
-                }
-
-                const { data, err } = await query;
-                if (data && data.length > 0) dbItems = data;
-                if (!error) error = err;
-            }
-
-            if (!error && dbItems && dbItems.length > 0) {
-                console.log("Supabase 지역 타겟팅 매핑 성공:", dbItems);
-                let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
-                if (validDbItems.length > 0) return validDbItems;
-            }
-        } catch (supabaseError) {
-            console.error("Supabase Database 접근 실패. 기존 공공데이터 레일 백업 전환 수행.", supabaseError);
+        // 1차: 시도/시군구를 쿼리에서 빼고 '능동로', '90' 핵심 키워드로만 1차 와일드카드 추출
+        if (rParams.searchKeyword && rParams.address2) {
+            const { data, err } = await supabaseClient
+                .from('elevator_list')
+                .select('*')
+                .ilike('address1', `%${rParams.searchKeyword}%`)
+                .ilike('address1', `%${rParams.address2}%`);
+                
+            if (data && data.length > 0) dbItems = data;
+            error = err;
         }
-
-        // 이하 수파베이스 데이터 미존재 시 구동되는 하이브리드 공공포털 Fallback 연동 인프라
-        const rParamsFallback = extractAddressParams(roadAddr);
-        const jParamsFallback = extractAddressParams(jibunAddr);
-        const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
         
-        let combinedItems = [];
-        let fetchPromises = [];
-
-        if (rParamsFallback.searchKeyword) {
-            fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
+        // 2차: 지번 탐색 백업
+        if (dbItems.length === 0 && jParams.searchKeyword && jParams.address2) {
+            const { data, err } = await supabaseClient
+                .from('elevator_list')
+                .select('*')
+                .ilike('address1', `%${jParams.searchKeyword}%`)
+                .ilike('address1', `%${jParams.address2}%`);
+                
+            if (data && data.length > 0) dbItems = data;
+            if (!error) error = err;
         }
-        if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
-            fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
+
+        if (!error && dbItems && dbItems.length > 0) {
+            console.log("Supabase 1차 추출 성공 (데이터 확인용):", dbItems);
+            
+            // 추출된 데이터를 기존에 만드신 정교한 자산(filterValidElevators)을 통해 2차 정밀 필터링
+            let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
+            if (validDbItems.length > 0) return validDbItems;
+        } else if (error) {
+            console.error("Supabase 쿼리 에러:", error);
         }
-
-        try {
-            const results = await Promise.all(fetchPromises);
-            results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
-        } catch(e) { console.error("Parallel scan error", e); }
-
-        let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
-
-        if (validItems.length === 0 && placeName) {
-            try {
-                let cleanBuldNm = placeName.split(/\s+/)[0]; 
-                const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
-                let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
-                if (resBackup.ok) {
-                    let dataBackup = await resBackup.json();
-                    let backupItems = dataBackup.response?.body?.items?.item || [];
-                    if (!Array.isArray(backupItems)) backupItems = [backupItems];
-                    
-                    validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
-                }
-            } catch (e) { console.error("Backup trigger bypass."); }
-        }
-        return validItems;
+    } catch (supabaseError) {
+        console.error("Supabase 연결 실패.", supabaseError);
     }
+
+    // --- 이하 기존 공공데이터 Fallback 인프라 레일 유지 (건드리지 않음) ---
+    const rParamsFallback = extractAddressParams(roadAddr);
+    const jParamsFallback = extractAddressParams(jibunAddr);
+    const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
+    
+    let combinedItems = [];
+    let fetchPromises = [];
+
+    if (rParamsFallback.searchKeyword) {
+        fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
+    }
+    if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
+        fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
+    }
+
+    try {
+        const results = await Promise.all(fetchPromises);
+        results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
+    } catch(e) { console.error("Parallel scan error", e); }
+
+    let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
+
+    if (validItems.length === 0 && placeName) {
+        try {
+            let cleanBuldNm = placeName.split(/\s+/)[0]; 
+            const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
+            let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
+            if (resBackup.ok) {
+                let dataBackup = await resBackup.json();
+                let backupItems = dataBackup.response?.body?.items?.item || [];
+                if (!Array.isArray(backupItems)) backupItems = [backupItems];
+                
+                validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
+            }
+        } catch (e) { console.error("Backup trigger bypass."); }
+    }
+    return validItems;
+}
 
     async function requestPublicElevatorList(apiSido, address1, signal) {
         const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(address1)}&_type=json`;
