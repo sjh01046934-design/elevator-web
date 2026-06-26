@@ -3,7 +3,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
 const axios = require('axios'); 
-const NodeCache = require('node-cache'); // [추가] 인메모리 캐시 모듈
+const NodeCache = require('node-cache'); // 인메모리 캐시 모듈
 
 const app = express();
 app.use(cors()); 
@@ -20,73 +20,85 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-// [기능 1] 초고속 DB 검색 (지도 마커 렌더링용)
+// [기능 1] 초고속 DB 검색 (상호명-공식건물명 주소 교차 매칭 알고리즘 고도화)
 app.get('/api/elevators', async (req, res) => {
     const keyword = req.query.keyword;
+    const address = req.query.address; // 프론트단에서 전달한 주소 컨텍스트 백업 인자 추가
     
-    if (!keyword) return res.status(400).send("검색할 건물명을 입력해주세요.");
+    if (!keyword) return res.status(400).send("검색어를 입력해주세요.");
 
     try {
-        const sql = `
-            SELECT A.*, B.위도, B.경도 
-            FROM elevators_raw A
-            LEFT JOIN coords_raw B ON A.건물명 = B.건물명
-            WHERE A.건물명 LIKE $1
-            LIMIT 1500  /* 🚀 대규모 단지도 모두 나오도록 1500으로 확장! */
-        `;
-        const result = await pool.query(sql, [`%${keyword}%`]);
-        
-        // 공공데이터 API를 거치지 않고 DB 데이터 그대로 즉시 리턴 (0.1초 컷)
+        let sql = "";
+        let queryParams = [];
+
+        // 💡 [개선] 주소 정보가 함께 들어온 경우, 건물명뿐만 아니라 주소 텍스트 기반으로도 교차 검색을 수행하여 '더클래식500'을 강제 유입시킴
+        if (address) {
+            sql = `
+                SELECT A.*, B.위도, B.경도 
+                FROM elevators_raw A
+                LEFT JOIN coords_raw B ON A.건물명 = B.건물명
+                WHERE A.건물명 LIKE $1 OR A.주소1 LIKE $2 OR A.주소2 LIKE $2
+                LIMIT 1500
+            `;
+            queryParams = [`%${keyword}%`, `%${address}%`];
+        } else {
+            sql = `
+                SELECT A.*, B.위도, B.경도 
+                FROM elevators_raw A
+                LEFT JOIN coords_raw B ON A.건물명 = B.건물명
+                WHERE A.건물명 LIKE $1 OR A.주소1 LIKE $1
+                LIMIT 1500
+            `;
+            queryParams = [`%${keyword}%`];
+        }
+
+        const result = await pool.query(sql, queryParams);
         res.json(result.rows);
 
     } catch (error) {
-        console.error("DB 검색 에러:", error);
+        console.error("Supabase 데이터베이스 검색 에러:", error);
         res.status(500).send("서버 에러가 발생했습니다.");
     }
 });
 
-// [기능 2] 실시간 운행상태 조회 API (캐싱 적용 완료!)
+// [기능 2] 실시간 운행상태 조회 API (공공데이터 파라미터 무결성 패치 완료)
 app.get('/api/realtime-status', async (req, res) => {
-    const elevatorNo = req.query.elevatorNo; // 단일 승강기 번호
+    const elevatorNo = req.query.elevatorNo; 
     if (!elevatorNo) return res.status(400).json({ status: "번호없음" });
 
     const safeElevatorNo = String(elevatorNo).trim().padStart(7, '0');
     
-    // 💡 [핵심] 1. 캐시 메모리에 이 승강기 번호가 있는지 먼저 확인합니다.
+    // 1. 인메모리 캐시 히트(Hit) 체크
     const cachedStatus = statusCache.get(safeElevatorNo);
     if (cachedStatus) {
-        // 이미 10분 내에 조회한 적이 있다면 정부 서버를 찌르지 않고 즉시 반환!
         return res.json({ status: cachedStatus }); 
     }
 
     try {
-        // 2. 캐시에 없으면 그때서야 정부 API를 호출합니다.
-        const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+        // 💡 [정정] 정부 승강기 표준 명세서의 공식 파라미터명인 'elevatorNo'로 정밀 수정 수행
+        const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
         
         const response = await axios.get(apiUrl, { timeout: 3000 });
 
         if (typeof response.data === 'string' && response.data.includes('<errMsg>')) {
-            console.error(`[API 인증키 오류 추정] 승강기: ${safeElevatorNo}`);
+            console.error(`[API 인증키 오류 발각] 승강기 고유번호: ${safeElevatorNo}`);
             return res.json({ status: "API키오류" }); 
         }
 
-        // 공공데이터의 기형적인 JSON 구조 커버 (items 껍질 유무)
         const items = response.data?.response?.body?.items?.item || response.data?.response?.body?.item;
         let currentStatus = "상태알수없음";
 
         if (items) {
              const itemData = Array.isArray(items) ? items[0] : items;
-             // 정부 API 데이터의 elvtrStts 필드 최우선 추출
              currentStatus = itemData.elvtrStts || itemData.elvtrSttsNm || "상태알수없음"; 
         }
 
-        // 💡 [핵심] 3. 정부에서 가져온 따끈따끈한 결과를 10분 동안 캐시에 저장해 둡니다.
+        // 3. 정상 수집된 상태 데이터를 10분간 캐싱 디렉토리에 적재
         statusCache.set(safeElevatorNo, currentStatus);
-
         res.json({ status: currentStatus });
 
     } catch (error) {
-        console.error(`❌ API 통신 실패 (승강기: ${safeElevatorNo}) - ${error.message}`);
+        console.error(`❌ 공공 API 게이트웨이 통신 실패 (호기번호: ${safeElevatorNo}) - ${error.message}`);
         res.json({ status: "확인불가" });
     }
 });
@@ -96,7 +108,7 @@ app.get('/', (req, res) => {
 });
 
 app.listen(3000, () => {
-    console.log("🚀 승강기 API 서버가 [인메모리 캐싱 + 1500대 확장 모드]로 가동 시작했습니다!");
+    console.log("🚀 백엔드 엔진이 [자치구 주소 보존 + 공식 파라미터 패치 + 1500대 광역 로드] 모드로 안정 가동 중입니다!");
 });
 
 module.exports = app;
