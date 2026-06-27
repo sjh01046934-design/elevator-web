@@ -450,88 +450,88 @@
     }
 
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
-        showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
+    showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
+    
+    try {
+        const rParams = extractAddressParams(roadAddr);
+        const jParams = extractAddressParams(jibunAddr);
+        const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
         
-        try {
-            const rParams = extractAddressParams(roadAddr);
-            const jParams = extractAddressParams(jibunAddr);
-            const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
-            
-            let dbItems = [];
-            let error = null;
+        let dbItems = [];
+        let error = null;
 
-            // 💡 1차: 도로명 주소 스캔 (검색어가 모두 존재할 때만 실행하여 500 에러 원천 차단)
-            if (rParams.searchKeyword && rParams.address2) {
-                const { data, err } = await supabaseClient
-                    .from('elevators_raw')
-                    .select('*')
-                    .ilike('building_address', `%${rParams.searchKeyword}%`)
-                    .ilike('building_address', `%${rParams.address2}%`);
-                    
-                if (data && data.length > 0) dbItems = data;
-                error = err;
-            }
-            
-            // 💡 2차: 지번 탐색 백업 (도로명 검색 실패 시 실행)
-            if (dbItems.length === 0 && jParams.searchKeyword && jParams.address2) {
-                const { data, err } = await supabaseClient
-                    .from('elevators_raw')
-                    .select('*')
-                    .ilike('building_address', `%${jParams.searchKeyword}%`)
-                    .ilike('building_address', `%${jParams.address2}%`);
-                    
-                if (data && data.length > 0) dbItems = data;
-                if (!error) error = err;
-            }
-
-            // 수파베이스에서 데이터를 찾았다면 기존의 정교한 자바스크립트 필터로 최종 검증
-            if (!error && dbItems && dbItems.length > 0) {
-                console.log("Supabase 추출 성공 (데이터 확인용):", dbItems);
-                let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
-                if (validDbItems.length > 0) return validDbItems;
-            }
-        } catch (supabaseError) {
-            console.warn("Supabase 스캔 생략/실패 (Fallback 전환):", supabaseError.message);
+        // 💡 1차: 도로명 스캔 (중복 ilike 제거 -> '능동로' 등 핵심 검색어만으로 넉넉하게 긁어옵니다)
+        if (rParams.searchKeyword) {
+            const { data, err } = await supabaseClient
+                .from('elevators_raw')
+                .select('*')
+                .ilike('building_address', `%${rParams.searchKeyword}%`)
+                .limit(2000); // 넉넉하게 가져오기
+                
+            if (data && data.length > 0) dbItems = data;
+            error = err;
         }
-
-        // --- 이하 공공데이터 Fallback ---
-        const rParamsFallback = extractAddressParams(roadAddr);
-        const jParamsFallback = extractAddressParams(jibunAddr);
-        const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
         
-        let combinedItems = [];
-        let fetchPromises = [];
-
-        if (rParamsFallback.searchKeyword) {
-            fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
+        // 💡 2차: 지번 탐색 백업 (도로명 검색 실패 시 실행)
+        if (dbItems.length === 0 && jParams.searchKeyword) {
+            const { data, err } = await supabaseClient
+                .from('elevators_raw')
+                .select('*')
+                .ilike('building_address', `%${jParams.searchKeyword}%`)
+                .limit(2000);
+                
+            if (data && data.length > 0) dbItems = data;
+            if (!error) error = err;
         }
-        if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
-            fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
+
+        // 수파베이스에서 가져온 '능동로' 전체 데이터 중 '90번지'에 해당하는 곳만 JS 필터가 0.001초만에 찾아냅니다.
+        if (!error && dbItems && dbItems.length > 0) {
+            console.log("Supabase 추출 성공 (데이터 확인용):", dbItems);
+            let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
+            if (validDbItems.length > 0) return validDbItems;
         }
-
-        try {
-            const results = await Promise.all(fetchPromises);
-            results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
-        } catch(e) { console.error("Parallel scan error", e); }
-
-        let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
-
-        if (validItems.length === 0 && placeName) {
-            try {
-                let cleanBuldNm = placeName.split(/\s+/)[0]; 
-                const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
-                let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
-                if (resBackup.ok) {
-                    let dataBackup = await resBackup.json();
-                    let backupItems = dataBackup.response?.body?.items?.item || [];
-                    if (!Array.isArray(backupItems)) backupItems = [backupItems];
-                    
-                    validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
-                }
-            } catch (e) { console.error("Backup trigger bypass."); }
-        }
-        return validItems;
+    } catch (supabaseError) {
+        console.warn("Supabase 스캔 생략/실패 (Fallback 전환):", supabaseError.message);
     }
+
+    // --- 이하 공공데이터 Fallback (기존과 완벽히 동일) ---
+    const rParamsFallback = extractAddressParams(roadAddr);
+    const jParamsFallback = extractAddressParams(jibunAddr);
+    const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
+    
+    let combinedItems = [];
+    let fetchPromises = [];
+
+    if (rParamsFallback.searchKeyword) {
+        fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
+    }
+    if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
+        fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
+    }
+
+    try {
+        const results = await Promise.all(fetchPromises);
+        results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
+    } catch(e) { console.error("Parallel scan error", e); }
+
+    let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
+
+    if (validItems.length === 0 && placeName) {
+        try {
+            let cleanBuldNm = placeName.split(/\s+/)[0]; 
+            const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
+            let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
+            if (resBackup.ok) {
+                let dataBackup = await resBackup.json();
+                let backupItems = dataBackup.response?.body?.items?.item || [];
+                if (!Array.isArray(backupItems)) backupItems = [backupItems];
+                
+                validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
+            }
+        } catch (e) { console.error("Backup trigger bypass."); }
+    }
+    return validItems;
+}
 
     async function requestPublicElevatorList(apiSido, address1, signal) {
         const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(address1)}&_type=json`;
