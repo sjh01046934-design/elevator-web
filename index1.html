@@ -1131,46 +1131,82 @@
 
         let markerNeedsUpdate = false;
         // 💡 1초 대기 (기존과 동일)
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
+        const fetchPromises = groupData.elevators.map(async (elv) => {
+
+            if (elv.scanned) return; 
+
+            // 💡 1초 대기 추가
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
             try {
+
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
+
                 
+
+                // 💡 단건 상세조회 주소(getElevatorViewM)로 정상 연동
+
                 const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
+
                 const data = await res.json();
+
                 
+
                 let displayStateText = "상태알수없음";
+
                 if (data.response?.body?.items?.item) {
+
                     let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
+
                     displayStateText = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || "상태불명";
+
                 }
+
+
 
                 const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
+
                 
-                // 💡 [핵심 수정] elv 객체 전체를 바꾸지 않고 필요한 속성만 업데이트합니다.
-                // elv 객체에는 이미 '속도', '정원', '설치위치' 등이 들어있으므로 이대로 두면 - 표시가 사라집니다.
+
                 elv.scanned = true;
+
                 if (elv.isOperating !== isOperating || elv.state !== displayStateText) {
-                    elv.isOperating = isOperating; 
-                    elv.state = displayStateText; 
-                    markerNeedsUpdate = true;
+
+                    elv.isOperating = isOperating; elv.state = displayStateText; markerNeedsUpdate = true;
+
                 }
 
+
+
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
+
                 if (statusEl) {
+
                     const finalColor = isOperating ? "#1e4e79" : "#d32f2f";
+
                     let finalText = displayStateText;
+
                     if (isOperating && (finalText === "합격" || finalText === "상태불명" || finalText.includes("정상") || finalText === "상태알수없음")) {
+
                         finalText = "정상운행";
+
                     }
-                    statusEl.style.color = finalColor; 
-                    statusEl.innerText = `[${finalText}]`;
+
+                    statusEl.style.color = finalColor; statusEl.innerText = `[${finalText}]`;
+
                 }
+
             } catch(e) {
+
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
+
                 if (statusEl) { statusEl.style.color = "#d32f2f"; statusEl.innerText = "[통신오류]"; }
+
             }
+
         });
 
         Promise.all(fetchPromises).then(() => { if (markerNeedsUpdate) renderData(true); });
