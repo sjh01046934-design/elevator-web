@@ -1132,7 +1132,8 @@
         let markerNeedsUpdate = false;
         const fetchPromises = groupData.elevators.map(async (elv) => {
             if (elv.scanned) return; 
-            
+            // 💡 1초 대기 추가
+    await new Promise(resolve => setTimeout(resolve, 1000));
             try {
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
                 
@@ -1223,7 +1224,7 @@
             } catch(e) {
                 if (e.name === 'AbortError') return; targetElv.scanned = true; 
             }
-            await new Promise(r => setTimeout(r, 100)); 
+            await new Promise(r => setTimeout(r, 1500)); 
         }
     }
 
