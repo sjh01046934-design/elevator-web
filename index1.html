@@ -465,8 +465,8 @@
                 const { data, err } = await supabaseClient
                     .from('elevators_raw')
                     .select('*')
-                    .ilike('건물주소', `%${rParams.searchKeyword}%`)
-                    .ilike('건물주소', `%${rParams.address2}%`);
+                    .ilike('building_address', `%${rParams.searchKeyword}%`)
+                    .ilike('building_address', `%${rParams.address2}%`);
                     
                 if (data && data.length > 0) dbItems = data;
                 error = err;
@@ -477,8 +477,8 @@
                 const { data, err } = await supabaseClient
                     .from('elevators_raw')
                     .select('*')
-                    .ilike('건물주소', `%${jParams.searchKeyword}%`)
-                    .ilike('건물주소', `%${jParams.address2}%`);
+                    .ilike('building_address', `%${jParams.searchKeyword}%`)
+                    .ilike('building_address', `%${jParams.address2}%`);
                     
                 if (data && data.length > 0) dbItems = data;
                 if (!error) error = err;
