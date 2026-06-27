@@ -263,7 +263,7 @@
                         document.getElementById('sidoSelector').value = sidoMap[rawSido] || rawSido.substring(0,2);
                         executeBroadSearch(); 
                     } else {
-                        hideLoadingMsg(); alert("해당 위치의 주소를 파악할 수 없습니다.");
+                        hideLoadingMsg(); alert("해당 위치의 주소를 파악할 수 가 없습니다.");
                     }
                 } else {
                     hideLoadingMsg();
@@ -449,153 +449,155 @@
         });
     }
 
+    // 🚀 [번역기 도입 완료] 수파베이스의 한글 컬럼 데이터를 자바스크립트 표준 규격으로 변환
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
-    showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
-    
-    try {
-        const rParams = extractAddressParams(roadAddr);
-        const jParams = extractAddressParams(jibunAddr);
-        const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
+        showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
         
-        let dbItems = [];
-        let error = null;
-
-        // 💡 [핵심] 수파베이스에서 가져온 한글 컬럼 데이터를 JS 필터가 이해하도록 영어로 번역해주는 어댑터
-        const mapSupabaseToStandard = (rows) => {
-            return rows.map(row => ({
-                ...row, // 원본 데이터 유지
-                address1: row.building_address || row.address || row['건물주소'] || "",
-                buld_nm: row['건물명'] || row.building_name || row.buld_nm || "",
-                elevator_no: row['승강기고유번호'] || row.elevator_no || row.elevatorNo || "0000000",
-                elvtrDivNm: row['승강기종류'] || row.elvtrKindNm || row.elvtrDivNm || "승객용"
-            }));
-        };
-
-        // 1차: 도로명 스캔 (building_address 기준)
-        if (rParams.searchKeyword) {
-            const { data, err } = await supabaseClient
-                .from('elevators_raw')
-                .select('*')
-                .ilike('building_address', `%${rParams.searchKeyword}%`)
-                .limit(2000);
-                
-            if (data && data.length > 0) dbItems = mapSupabaseToStandard(data); // 데이터 번역 수행
-            error = err;
-        }
-        
-        // 2차: 지번 탐색 백업
-        if (dbItems.length === 0 && jParams.searchKeyword) {
-            const { data, err } = await supabaseClient
-                .from('elevators_raw')
-                .select('*')
-                .ilike('building_address', `%${jParams.searchKeyword}%`)
-                .limit(2000);
-                
-            if (data && data.length > 0) dbItems = mapSupabaseToStandard(data); // 데이터 번역 수행
-            if (!error) error = err;
-        }
-
-        if (!error && dbItems && dbItems.length > 0) {
-            console.log("Supabase 번역 완료 데이터 (확인용):", dbItems);
-            // 번역된 데이터를 정교한 자바스크립트 필터에 통과시킴 (90번지 추출)
-            let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
-            if (validDbItems.length > 0) return validDbItems;
-        }
-    } catch (supabaseError) {
-        console.warn("Supabase 스캔 생략/실패 (Fallback 전환):", supabaseError.message);
-    }
-
-    // --- 이하 공공데이터 Fallback (기존과 동일) ---
-    const rParamsFallback = extractAddressParams(roadAddr);
-    const jParamsFallback = extractAddressParams(jibunAddr);
-    const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
-    
-    let combinedItems = [];
-    let fetchPromises = [];
-
-    if (rParamsFallback.searchKeyword) {
-        fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
-    }
-    if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
-        fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
-    }
-
-    try {
-        const results = await Promise.all(fetchPromises);
-        results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
-    } catch(e) { console.error("Parallel scan error", e); }
-
-    let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
-
-    if (validItems.length === 0 && placeName) {
         try {
-            let cleanBuldNm = placeName.split(/\s+/)[0]; 
-            const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
-            let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
-            if (resBackup.ok) {
-                let dataBackup = await resBackup.json();
-                let backupItems = dataBackup.response?.body?.items?.item || [];
-                if (!Array.isArray(backupItems)) backupItems = [backupItems];
-                
-                validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
-            }
-        } catch (e) { console.error("Backup trigger bypass."); }
-    }
-    return validItems;
-}
-
-    async function requestPublicElevatorList(apiSido, address1, signal) {
-    const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(address1)}&_type=json`;
-    let list = [];
-    
-    try {
-        let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
-        
-        if (res.ok) {
-            let data = await res.json();
-            let totalCount = data.response?.body?.totalCount || 0;
-            let items = data.response?.body?.items?.item || [];
-            if (!Array.isArray(items)) items = [items];
-            list.push(...items);
-
-            let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
+            const rParams = extractAddressParams(roadAddr);
+            const jParams = extractAddressParams(jibunAddr);
+            const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
             
-            if (maxPages > 1) {
-                // 💡 [핵심 수정] Promise.all 동시 다발 호출 대신, 순차적으로 0.3초 대기하며 안전하게 징검다리 호출
-                for (let p = 2; p <= maxPages; p++) {
-                    // 서버가 숨 쉴 틈(300ms)을 줍니다.
-                    await new Promise(resolve => setTimeout(resolve, 300));
+            let dbItems = [];
+            let error = null;
+
+            // 💡 [핵심] 수파베이스에서 가져온 데이터를 JS 필터가 이해하도록 영어로 번역해주는 어댑터 (0 채우기 포함)
+            const mapSupabaseToStandard = (rows) => {
+                return rows.map(row => {
+                    let rawElvNo = String(row['승강기고유번호'] || row.elevator_no || row.elevatorNo || "");
+                    let paddedElvNo = rawElvNo ? rawElvNo.trim().padStart(7, '0') : "0000000";
+
+                    return {
+                        ...row,
+                        address1: row.building_address || row.address || row['건물주소'] || "",
+                        buld_nm: row['건물명'] || row.building_name || row.buld_nm || "",
+                        elevator_no: paddedElvNo,
+                        elvtrDivNm: row['승강기종류'] || row.elvtrKindNm || row.elvtrDivNm || "승객용"
+                    };
+                });
+            };
+
+            // 1차: 도로명 스캔
+            if (rParams.searchKeyword) {
+                const { data, err } = await supabaseClient
+                    .from('elevators_raw')
+                    .select('*')
+                    .ilike('building_address', `%${rParams.searchKeyword}%`)
+                    .limit(2000);
                     
-                    try {
-                        let pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
+                if (data && data.length > 0) dbItems = mapSupabaseToStandard(data);
+                error = err;
+            }
+            
+            // 2차: 지번 탐색 백업
+            if (dbItems.length === 0 && jParams.searchKeyword) {
+                const { data, err } = await supabaseClient
+                    .from('elevators_raw')
+                    .select('*')
+                    .ilike('building_address', `%${jParams.searchKeyword}%`)
+                    .limit(2000);
+                    
+                if (data && data.length > 0) dbItems = mapSupabaseToStandard(data);
+                if (!error) error = err;
+            }
+
+            if (!error && dbItems && dbItems.length > 0) {
+                let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
+                if (validDbItems.length > 0) return validDbItems;
+            }
+        } catch (supabaseError) {
+            console.warn("Supabase 스캔 생략/실패 (Fallback 전환):", supabaseError.message);
+        }
+
+        // --- 이하 공공데이터 Fallback ---
+        const rParamsFallback = extractAddressParams(roadAddr);
+        const jParamsFallback = extractAddressParams(jibunAddr);
+        const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
+        
+        let combinedItems = [];
+        let fetchPromises = [];
+
+        if (rParamsFallback.searchKeyword) {
+            fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
+        }
+        if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
+            fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
+        }
+
+        try {
+            const results = await Promise.all(fetchPromises);
+            results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
+        } catch(e) { console.error("Parallel scan error", e); }
+
+        let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
+
+        if (validItems.length === 0 && placeName) {
+            try {
+                let cleanBuldNm = placeName.split(/\s+/)[0]; 
+                const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
+                let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
+                if (resBackup.ok) {
+                    let dataBackup = await resBackup.json();
+                    let backupItems = dataBackup.response?.body?.items?.item || [];
+                    if (!Array.isArray(backupItems)) backupItems = [backupItems];
+                    
+                    validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
+                }
+            } catch (e) { console.error("Backup trigger bypass."); }
+        }
+        return validItems;
+    }
+
+    // 🚀 [429 에러 해결] 공공데이터 다중 페이지 호출 시 과부하 방지 순차 지연 로직 적용
+    async function requestPublicElevatorList(apiSido, address1, signal) {
+        const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(address1)}&_type=json`;
+        let list = [];
+        
+        try {
+            let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
+            
+            if (res.ok) {
+                let data = await res.json();
+                let totalCount = data.response?.body?.totalCount || 0;
+                let items = data.response?.body?.items?.item || [];
+                if (!Array.isArray(items)) items = [items];
+                list.push(...items);
+
+                let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
+                
+                if (maxPages > 1) {
+                    // 💡 [핵심] 0.3초 대기하며 안전하게 징검다리 호출
+                    for (let p = 2; p <= maxPages; p++) {
+                        await new Promise(resolve => setTimeout(resolve, 300));
                         
-                        if (pageRes.ok) {
-                            let pageData = await pageRes.json();
-                            if (pageData.response?.body?.items?.item) {
-                                let itms = pageData.response.body.items.item;
-                                if (!Array.isArray(itms)) itms = [itms];
-                                list.push(...itms);
+                        try {
+                            let pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
+                            
+                            if (pageRes.ok) {
+                                let pageData = await pageRes.json();
+                                if (pageData.response?.body?.items?.item) {
+                                    let itms = pageData.response.body.items.item;
+                                    if (!Array.isArray(itms)) itms = [itms];
+                                    list.push(...itms);
+                                }
+                            } else if (pageRes.status === 429) {
+                                console.warn(`[API 과부하 보호] 페이지 ${p}에서 429 에러 발생. 추가 호출을 중단합니다.`);
+                                break; 
                             }
-                        } else if (pageRes.status === 429) {
-                            // 💡 만약 또 429가 뜨면, 무리하지 않고 그 즉시 페이지 넘기기를 중단하고 지금까지 모은 것만 반환
-                            console.warn(`[API 과부하 보호] 페이지 ${p}에서 429 에러 발생. 추가 호출을 중단합니다.`);
-                            break; 
+                        } catch (err) {
+                            if (err.name !== 'AbortError') console.warn(`페이지 ${p} 호출 실패:`, err);
                         }
-                    } catch (err) {
-                        // 중간 페이지 통신이 실패해도 전체가 멈추지 않고 계속 진행되도록 처리
-                        if (err.name !== 'AbortError') console.warn(`페이지 ${p} 호출 실패:`, err);
                     }
                 }
+            } else if (res.status === 429) {
+                console.error("[API 과부하] 1페이지부터 429 에러가 발생했습니다. 잠시 후 다시 시도해주세요.");
             }
-        } else if (res.status === 429) {
-            console.error("[API 과부하] 1페이지부터 429 에러가 발생했습니다. 잠시 후 다시 시도해주세요.");
+        } catch (e) { 
+            if (e.name !== 'AbortError') console.error("공공데이터 호출 완전 실패", e); 
         }
-    } catch (e) { 
-        if (e.name !== 'AbortError') console.error("공공데이터 호출 완전 실패", e); 
+        
+        return list;
     }
-    
-    return list;
-}
 
     function searchKakaoPlaces() {
         const query = document.getElementById('searchInput').value.trim();
@@ -756,8 +758,11 @@
             else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
             if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
+            // 💡 0 패딩 처리 완료
+            const safeElevatorNo = String(apiItem.elevatorNo || apiItem.elevator_no || "").trim().padStart(7, '0') || "번호 미상";
+
             return {
-                elevatorNo: apiItem.elevatorNo || apiItem.elevator_no || "번호 미상",
+                elevatorNo: safeElevatorNo,
                 type: refinedType, speed: finalSpeed, floors: apiItem.shuttleSection || apiItem.shuttle_section || "-",
                 weight: finalWeight, capacity: finalCapacity, installPlace: String(apiItem.installationPlace || apiItem.installation_place || "-").trim(),
                 state: stts, isOperating: isOperating, scanned: false 
@@ -976,8 +981,11 @@
             else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
             if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
+            // 💡 0 패딩 처리 완료
+            const safeElevatorNo = String(apiItem.elevatorNo || apiItem.elevator_no || "").trim().padStart(7, '0') || "번호 미상";
+
             groupedMap.get(key).elevators.push({
-                elevatorNo: apiItem.elevatorNo || apiItem.elevator_no || "번호 미상",
+                elevatorNo: safeElevatorNo,
                 type: refinedType, speed: finalSpeed, floors: apiItem.shuttleSection || apiItem.shuttle_section || "-",
                 weight: finalWeight, capacity: finalCapacity, installPlace: String(apiItem.installationPlace || apiItem.installation_place || "-").trim(),
                 state: stts, isOperating: isOperating, scanned: false 
@@ -1128,8 +1136,8 @@
             try {
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
                 
-                // 💡 공공데이터 단건 상세조회 API 연동 반영
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorInformation') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+                // 💡 단건 상세조회 주소(getElevatorViewM)로 정상 연동
+                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
                 const data = await res.json();
                 
@@ -1195,8 +1203,8 @@
             try {
                 const safeElevatorNo = String(targetElv.elevatorNo).trim().padStart(7, '0');
                 
-                // 💡 백그라운드용 공공데이터 단건 상세조회 API 연동 반영
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorInformation') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+                // 💡 단건 상세조회 주소(getElevatorViewM)로 정상 연동
+                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl), { signal });
                 const data = await res.json(); 
                 
