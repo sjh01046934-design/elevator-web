@@ -545,38 +545,57 @@
 }
 
     async function requestPublicElevatorList(apiSido, address1, signal) {
-        const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(address1)}&_type=json`;
-        let list = [];
-        try {
-            let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
-            if (res.ok) {
-                let data = await res.json();
-                let totalCount = data.response?.body?.totalCount || 0;
-                let items = data.response?.body?.items?.item || [];
-                if (!Array.isArray(items)) items = [items];
-                list.push(...items);
+    const baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&address1=${encodeURIComponent(address1)}&_type=json`;
+    let list = [];
+    
+    try {
+        let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
+        
+        if (res.ok) {
+            let data = await res.json();
+            let totalCount = data.response?.body?.totalCount || 0;
+            let items = data.response?.body?.items?.item || [];
+            if (!Array.isArray(items)) items = [items];
+            list.push(...items);
 
-                let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
-                if (maxPages > 1) {
-                    let fetchPromises = [];
-                    for (let p = 2; p <= maxPages; p++) {
-                        fetchPromises.push(
-                            fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal }).then(r => r.ok ? r.json() : null).catch(() => null)
-                        );
-                    }
-                    let results = await Promise.all(fetchPromises);
-                    results.forEach(resData => {
-                        if (resData && resData.response?.body?.items?.item) {
-                            let itms = resData.response.body.items.item;
-                            if (!Array.isArray(itms)) itms = [itms];
-                            list.push(...itms);
+            let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
+            
+            if (maxPages > 1) {
+                // 💡 [핵심 수정] Promise.all 동시 다발 호출 대신, 순차적으로 0.3초 대기하며 안전하게 징검다리 호출
+                for (let p = 2; p <= maxPages; p++) {
+                    // 서버가 숨 쉴 틈(300ms)을 줍니다.
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    try {
+                        let pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
+                        
+                        if (pageRes.ok) {
+                            let pageData = await pageRes.json();
+                            if (pageData.response?.body?.items?.item) {
+                                let itms = pageData.response.body.items.item;
+                                if (!Array.isArray(itms)) itms = [itms];
+                                list.push(...itms);
+                            }
+                        } else if (pageRes.status === 429) {
+                            // 💡 만약 또 429가 뜨면, 무리하지 않고 그 즉시 페이지 넘기기를 중단하고 지금까지 모은 것만 반환
+                            console.warn(`[API 과부하 보호] 페이지 ${p}에서 429 에러 발생. 추가 호출을 중단합니다.`);
+                            break; 
                         }
-                    });
+                    } catch (err) {
+                        // 중간 페이지 통신이 실패해도 전체가 멈추지 않고 계속 진행되도록 처리
+                        if (err.name !== 'AbortError') console.warn(`페이지 ${p} 호출 실패:`, err);
+                    }
                 }
             }
-        } catch (e) { console.error("Fetch failure", e); }
-        return list;
+        } else if (res.status === 429) {
+            console.error("[API 과부하] 1페이지부터 429 에러가 발생했습니다. 잠시 후 다시 시도해주세요.");
+        }
+    } catch (e) { 
+        if (e.name !== 'AbortError') console.error("공공데이터 호출 완전 실패", e); 
     }
+    
+    return list;
+}
 
     function searchKakaoPlaces() {
         const query = document.getElementById('searchInput').value.trim();
