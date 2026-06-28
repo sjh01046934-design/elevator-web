@@ -567,7 +567,7 @@
                 
                 if (maxPages > 1) {
                     for (let p = 2; p <= maxPages; p++) {
-                        await new Promise(resolve => setTimeout(resolve, 300));
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                         
                         try {
                             let pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
@@ -986,7 +986,7 @@
             let weightNum = String(apiItem.liveLoad || apiItem.live_load || "").replace(/[^0-9]/g, ""); 
             let finalWeight = weightNum ? weightNum + " kg" : "-";
             let speedNum = String(apiItem.ratedSpeed || apiItem.rated_speed || "").replace(/[^0-9.]/g, "");
-            let finalSpeed = speedNum ? speedNum + " m/min" : "-";
+            let finalSpeed = speedNum ? speedNum + " m/s" : "-";
             let capNum = String(apiItem.prsonCnt || apiItem.personCnt || apiItem.person_cnt || "").replace(/[^0-9]/g, "");
             let finalCapacity = "-";
             if (capNum && parseInt(capNum) > 0) finalCapacity = parseInt(capNum) + "명";
