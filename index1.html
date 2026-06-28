@@ -451,102 +451,115 @@
 
     // 🚀 [번역기 도입 완료] 수파베이스의 한글 컬럼 데이터를 자바스크립트 표준 규격으로 변환
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
-        showLoadingMsg(`⏳ Supabase 자산 DB에서 매핑 정보 조회 중...`);
+    showLoadingMsg(`⏳ Supabase 자산 DB에서 정밀 매핑 정보 조회 중...`);
+    
+    try {
+        const rParams = extractAddressParams(roadAddr);
+        const jParams = extractAddressParams(jibunAddr);
+        const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
         
-        try {
-            const rParams = extractAddressParams(roadAddr);
-            const jParams = extractAddressParams(jibunAddr);
-            const borough = extractBorough(roadAddr) || extractBorough(jibunAddr);
-            
-            let dbItems = [];
-            let error = null;
+        let dbItems = [];
+        let error = null;
 
-            // 수파베이스에서 가져온 데이터를 JS 필터가 이해하도록 영어로 번역해주는 어댑터 (0 채우기 포함)
-            const mapSupabaseToStandard = (rows) => {
-                return rows.map(row => {
-                    let rawElvNo = String(row['승강기고유번호'] || row.elevator_no || row.elevatorNo || "");
-                    let paddedElvNo = rawElvNo ? rawElvNo.trim().padStart(7, '0') : "0000000";
+        const mapSupabaseToStandard = (rows) => {
+            return rows.map(row => {
+                let rawElvNo = String(row['승강기고유번호'] || row.elevator_no || row.elevatorNo || "");
+                let paddedElvNo = rawElvNo ? rawElvNo.trim().padStart(7, '0') : "0000000";
+                return {
+                    ...row,
+                    address1: row.building_address || row.address || row['건물주소'] || "",
+                    buld_nm: row['건물명'] || row.building_name || row.buld_nm || "",
+                    elevator_no: paddedElvNo,
+                    elvtrDivNm: row['승강기종류'] || row.elvtrKindNm || row.elvtrDivNm || "승객용"
+                };
+            });
+        };
 
-                    return {
-                        ...row,
-                        address1: row.building_address || row.address || row['건물주소'] || "",
-                        buld_nm: row['건물명'] || row.building_name || row.buld_nm || "",
-                        elevator_no: paddedElvNo,
-                        elvtrDivNm: row['승강기종류'] || row.elvtrKindNm || row.elvtrDivNm || "승객용"
-                    };
-                });
-            };
-
-            // 1차: 도로명 스캔 (building_address 기준)
-            if (rParams.searchKeyword) {
-                const { data, err } = await supabaseClient
-                    .from('elevators_raw')
-                    .select('*')
-                    .ilike('building_address', `%${rParams.searchKeyword}%`)
-                    .limit(2000);
-                    
-                if (data && data.length > 0) dbItems = mapSupabaseToStandard(data);
-                error = err;
-            }
-            
-            // 2차: 지번 탐색 백업
-            if (dbItems.length === 0 && jParams.searchKeyword) {
-                const { data, err } = await supabaseClient
-                    .from('elevators_raw')
-                    .select('*')
-                    .ilike('building_address', `%${jParams.searchKeyword}%`)
-                    .limit(2000);
-                    
-                if (data && data.length > 0) dbItems = mapSupabaseToStandard(data);
-                if (!error) error = err;
-            }
-
-            if (!error && dbItems && dbItems.length > 0) {
-                let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
-                if (validDbItems.length > 0) return validDbItems;
-            }
-        } catch (supabaseError) {
-            console.warn("Supabase 스캔 생략/실패 (Fallback 전환):", supabaseError.message);
+        // 💡 [핵심] '능동로'와 '90'을 하나로 합침 -> "%능동로%90%"
+        // 중간에 띄어쓰기가 있든 없든 수파베이스가 완벽하고 빠르게 찾아냅니다.
+        let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : "";
+        if (rParams.searchKeyword && rParams.address2) {
+            let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); // '90-1'에서 '90'만 추출
+            rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
         }
 
-        // --- 이하 공공데이터 Fallback ---
-        const rParamsFallback = extractAddressParams(roadAddr);
-        const jParamsFallback = extractAddressParams(jibunAddr);
-        const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
+        // 1차: 도로명 정밀 스캔
+        if (rSearchPattern) {
+            const { data, err } = await supabaseClient
+                .from('elevators_raw')
+                .select('*')
+                .ilike('building_address', rSearchPattern)
+                .limit(200); // 정밀 검색이므로 200개면 아주 충분합니다.
+                
+            if (data && data.length > 0) dbItems = mapSupabaseToStandard(data);
+            error = err;
+        }
         
-        let combinedItems = [];
-        let fetchPromises = [];
-
-        if (rParamsFallback.searchKeyword) {
-            fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
-        }
-        if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
-            fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
+        // 💡 지번도 마찬가지로 "%자양동%227%" 형태로 하나로 합침
+        let jSearchPattern = jParams.searchKeyword ? `%${jParams.searchKeyword}%` : "";
+        if (jParams.searchKeyword && jParams.address2) {
+            let mainNum = jParams.address2.split('-')[0].replace(/[^0-9]/g, '');
+            jSearchPattern = `%${jParams.searchKeyword}%${mainNum}%`;
         }
 
-        try {
-            const results = await Promise.all(fetchPromises);
-            results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
-        } catch(e) { console.error("Parallel scan error", e); }
-
-        let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
-
-        if (validItems.length === 0 && placeName) {
-            try {
-                let cleanBuldNm = placeName.split(/\s+/)[0]; 
-                const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
-                let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
-                if (resBackup.ok) {
-                    let dataBackup = await resBackup.json();
-                    let backupItems = dataBackup.response?.body?.items?.item || [];
-                    if (!Array.isArray(backupItems)) backupItems = [backupItems];
-                    
-                    validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
-                }
-            } catch (e) { console.error("Backup trigger bypass."); }
+        // 2차: 지번 정밀 탐색 백업
+        if (dbItems.length === 0 && jSearchPattern) {
+            const { data, err } = await supabaseClient
+                .from('elevators_raw')
+                .select('*')
+                .ilike('building_address', jSearchPattern)
+                .limit(200);
+                
+            if (data && data.length > 0) dbItems = mapSupabaseToStandard(data);
+            if (!error) error = err;
         }
-        return validItems;
+
+        if (!error && dbItems && dbItems.length > 0) {
+            let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
+            if (validDbItems.length > 0) return validDbItems;
+        }
+    } catch (supabaseError) {
+        console.warn("Supabase 스캔 생략/실패 (Fallback 전환):", supabaseError.message);
     }
+
+    // --- 이하 공공데이터 Fallback ---
+    const rParamsFallback = extractAddressParams(roadAddr);
+    const jParamsFallback = extractAddressParams(jibunAddr);
+    const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
+    
+    let combinedItems = [];
+    let fetchPromises = [];
+
+    if (rParamsFallback.searchKeyword) {
+        fetchPromises.push(requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal));
+    }
+    if (jParamsFallback.searchKeyword && jParamsFallback.searchKeyword !== rParamsFallback.searchKeyword) {
+        fetchPromises.push(requestPublicElevatorList(apiSido, jParamsFallback.searchKeyword, signal));
+    }
+
+    try {
+        const results = await Promise.all(fetchPromises);
+        results.forEach(res => { if (Array.isArray(res)) combinedItems.push(...res); });
+    } catch(e) { console.error("Parallel scan error", e); }
+
+    let validItems = filterValidElevators(combinedItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
+
+    if (validItems.length === 0 && placeName) {
+        try {
+            let cleanBuldNm = placeName.split(/\s+/)[0]; 
+            const backupUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}&buld_nm=${encodeURIComponent(cleanBuldNm)}&_type=json`;
+            let resBackup = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(backupUrl), { signal });
+            if (resBackup.ok) {
+                let dataBackup = await resBackup.json();
+                let backupItems = dataBackup.response?.body?.items?.item || [];
+                if (!Array.isArray(backupItems)) backupItems = [backupItems];
+                
+                validItems = filterValidElevators(backupItems, boroughFallback, rParamsFallback.searchKeyword, rParamsFallback.address2, jParamsFallback.searchKeyword, jParamsFallback.address2);
+            }
+        } catch (e) { console.error("Backup trigger bypass."); }
+    }
+    return validItems;
+}
 
     // 🚀 [429 에러 해결] 공공데이터 다중 페이지 호출 시 과부하 방지 순차 지연 로직 적용
     async function requestPublicElevatorList(apiSido, address1, signal) {
