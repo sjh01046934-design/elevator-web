@@ -461,25 +461,10 @@
         let dbItems = [];
         let error = null;
 
-        const mapSupabaseToStandard = (rows) => {
-            return rows.map(row => {
-                let rawElvNo = String(row['승강기고유번호'] || row.elevator_no || row.elevatorNo || "");
-                let paddedElvNo = rawElvNo ? rawElvNo.trim().padStart(7, '0') : "0000000";
-                return {
-                    ...row,
-                    address1: row.building_address || row.address || row['건물주소'] || "",
-                    buld_nm: row['건물명'] || row.building_name || row.buld_nm || "",
-                    elevator_no: paddedElvNo,
-                    elvtrDivNm: row['승강기종류'] || row.elvtrKindNm || row.elvtrDivNm || "승객용"
-                };
-            });
-        };
-
-        // 💡 [핵심] '능동로'와 '90'을 하나로 합침 -> "%능동로%90%"
-        // 중간에 띄어쓰기가 있든 없든 수파베이스가 완벽하고 빠르게 찾아냅니다.
+        // 도로명 검색 패턴 생성 -> "%능동로%90%"
         let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : "";
         if (rParams.searchKeyword && rParams.address2) {
-            let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); // '90-1'에서 '90'만 추출
+            let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
             rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
         }
 
@@ -489,13 +474,13 @@
                 .from('elevators_raw')
                 .select('*')
                 .ilike('building_address', rSearchPattern)
-                .limit(200); // 정밀 검색이므로 200개면 아주 충분합니다.
+                .limit(200); 
                 
-            if (data && data.length > 0) dbItems = mapSupabaseToStandard(data);
+            if (data && data.length > 0) dbItems = data; // 💡 번역기 없이 raw data 그대로 사용
             error = err;
         }
         
-        // 💡 지번도 마찬가지로 "%자양동%227%" 형태로 하나로 합침
+        // 지번 검색 패턴 생성 -> "%자양동%227%"
         let jSearchPattern = jParams.searchKeyword ? `%${jParams.searchKeyword}%` : "";
         if (jParams.searchKeyword && jParams.address2) {
             let mainNum = jParams.address2.split('-')[0].replace(/[^0-9]/g, '');
@@ -510,11 +495,12 @@
                 .ilike('building_address', jSearchPattern)
                 .limit(200);
                 
-            if (data && data.length > 0) dbItems = mapSupabaseToStandard(data);
+            if (data && data.length > 0) dbItems = data;
             if (!error) error = err;
         }
 
         if (!error && dbItems && dbItems.length > 0) {
+            // 💡 데이터가 이미 표준 주소 규격(building_address 등)이므로 어댑터 없이 바로 매핑 및 필터 작동
             let validDbItems = filterValidElevators(dbItems, borough, rParams.searchKeyword, rParams.address2, jParams.searchKeyword, jParams.address2);
             if (validDbItems.length > 0) return validDbItems;
         }
@@ -522,7 +508,7 @@
         console.warn("Supabase 스캔 생략/실패 (Fallback 전환):", supabaseError.message);
     }
 
-    // --- 이하 공공데이터 Fallback ---
+    // --- 이하 공공데이터 Fallback (기존과 완벽히 동일) ---
     const rParamsFallback = extractAddressParams(roadAddr);
     const jParamsFallback = extractAddressParams(jibunAddr);
     const boroughFallback = extractBorough(roadAddr) || extractBorough(jibunAddr);
@@ -721,67 +707,82 @@
     }
 
     async function hydrateDummyGroup(group, signal) {
-        const sido = document.getElementById('sidoSelector').value; 
-        const apiSido = FULL_SIDO_MAP[sido] || sido;
-        
-        let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, group.roadAddress || group.address, group.jibunAddress || group.address, group.buildingName, signal);
+    const sido = document.getElementById('sidoSelector').value; 
+    const apiSido = FULL_SIDO_MAP[sido] || sido;
+    
+    let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, group.roadAddress || group.address, group.jibunAddress || group.address, group.buildingName, signal);
 
-        if (validItems && validItems.length > 0) {
-            let firstItem = validItems[0];
-            let origBuldNm = String(firstItem.buldNm || firstItem.buld_nm || "").trim();
-            if (origBuldNm && origBuldNm !== "null" && !origBuldNm.includes("없음") && !group.buildingName.includes(origBuldNm)) {
-                group.buildingName = `${group.buildingName} [${origBuldNm}]`;
-            }
+    // 💡 [건물명] 이 부분은 이미 완벽하게 양쪽 다 대응하고 있습니다.
+    if (validItems && validItems.length > 0) {
+        let firstItem = validItems[0];
+        let origBuldNm = String(firstItem.buldNm || firstItem.buld_nm || "").trim();
+        if (origBuldNm && origBuldNm !== "null" && !origBuldNm.includes("없음") && !group.buildingName.includes(origBuldNm)) {
+            group.buildingName = `${group.buildingName} [${origBuldNm}]`;
         }
-
-        const uniqueMap = new Map();
-        validItems.forEach(item => {
-            const elvNo = item.elevatorNo || item.elevator_no;
-            if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item);
-        });
-
-        let elevs = Array.from(uniqueMap.values()).filter(apiItem => {
-            const type = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
-            return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
-        });
-
-        group.elevators = elevs.map(apiItem => {
-            const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
-            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
-            const rawType = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
-            if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
-            else if (rawType.includes("에스컬레이터")) refinedType = "에스컬레이터";
-            else if (rawType.includes("무빙워크")) refinedType = "무빙워크";
-            else if (rawType.includes("수직") && rawType.includes("휠체어")) refinedType = "수직형휠체어리프트";
-            else if (rawType.includes("경사") && rawType.includes("휠체어")) refinedType = "경사형휠체어리프트";
-            else if (rawType.includes("장애인")) refinedType = "장애인용";
-            else if (rawType.includes("소방") || rawType.includes("구조") || rawType.includes("비상")) refinedType = "소방구조용";
-            else if (rawType.includes("화물") && rawType.includes("승객")) refinedType = "승객화물용";
-            else if (rawType.includes("병원") || rawType.includes("침대")) refinedType = "병원용";
-
-            let weightNum = String(apiItem.liveLoad || apiItem.live_load || "").replace(/[^0-9]/g, ""); 
-            let finalWeight = weightNum ? weightNum + " kg" : "-";
-            let speedNum = String(apiItem.ratedSpeed || apiItem.rated_speed || "").replace(/[^0-9.]/g, "");
-            let finalSpeed = speedNum ? speedNum + " m/min" : "-";
-            let capNum = String(apiItem.prsonCnt || apiItem.personCnt || apiItem.person_cnt || "").replace(/[^0-9]/g, "");
-            let finalCapacity = "-";
-            if (capNum && parseInt(capNum) > 0) finalCapacity = parseInt(capNum) + "명";
-            else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
-            if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
-
-            const safeElevatorNo = String(apiItem.elevatorNo || apiItem.elevator_no || "").trim().padStart(7, '0') || "번호 미상";
-
-            return {
-                elevatorNo: safeElevatorNo,
-                type: refinedType, speed: finalSpeed, floors: apiItem.shuttleSection || apiItem.shuttle_section || "-",
-                weight: finalWeight, capacity: finalCapacity, installPlace: String(apiItem.installationPlace || apiItem.installation_place || "-").trim(),
-                state: stts, isOperating: isOperating, scanned: false 
-            };
-        });
-        group.isDummy = false;
-        if (group.elevators.length === 0) group.noElevator = true;
     }
 
+    const uniqueMap = new Map();
+    validItems.forEach(item => {
+        // 💡 [고유번호] 영문 컬럼명 elevator_no 반영
+        const elvNo = item.elevator_no || item.elevatorNo;
+        if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item);
+    });
+
+    // 💡 [승강기 종류 필터링] 영문 컬럼명 elvtr_kind_nm 반영
+    let elevs = Array.from(uniqueMap.values()).filter(apiItem => {
+        const type = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
+        return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
+    });
+
+    group.elevators = elevs.map(apiItem => {
+        // 💡 [운행상태] 영문 컬럼명 elvtr_stts_nm 반영
+        const stts = String(apiItem.elvtr_stts_nm || apiItem.elvtrSttsNm || apiItem.elvtrStts || "상태불명").trim();
+        const isOperating = !(stts.includes('정지') || stts.includes('중지') || 단includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
+        
+        // 💡 [종류 매핑] 영문 컬럼명 elvtr_kind_nm 반영
+        const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); 
+        let refinedType = "승객용"; 
+        if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
+        else if (rawType.includes("에스컬레이터")) refinedType = "에스컬레이터";
+        else if (rawType.includes("무빙워크")) refinedType = "무빙워크";
+        else if (rawType.includes("수직") && rawType.includes("휠체어")) refinedType = "수직형휠체어리프트";
+        else if (rawType.includes("경사") && rawType.includes("휠체어")) refinedType = "경사형휠체어리프트";
+        else if (rawType.includes("장애인")) refinedType = "장애인용";
+        else if (rawType.includes("소방") || rawType.includes("구조") || rawType.includes("비상")) refinedType = "소방구조용";
+        else if (rawType.includes("화물") && rawType.includes("승객")) refinedType = "승객화물용";
+        else if (rawType.includes("병원") || rawType.includes("침대")) refinedType = "병원용";
+
+        // 💡 [상세 제원] 수파베이스 영문 컬럼명 완벽 대응 (live_load, rated_speed, person_cnt)
+        let weightNum = String(apiItem.live_load || apiItem.liveLoad || "").replace(/[^0-9]/g, ""); 
+        let finalWeight = weightNum ? weightNum + " kg" : "-";
+        
+        let speedNum = String(apiItem.rated_speed || apiItem.ratedSpeed || "").replace(/[^0-9.]/g, "");
+        let finalSpeed = speedNum ? speedNum + " m/min" : "-";
+        
+        let capNum = String(apiItem.person_cnt || apiItem.prsonCnt || apiItem.personCnt || "").replace(/[^0-9]/g, "");
+        let finalCapacity = "-";
+        if (capNum && parseInt(capNum) > 0) finalCapacity = parseInt(capNum) + "명";
+        else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
+        if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
+
+        const safeElevatorNo = String(apiItem.elevator_no || apiItem.elevatorNo || "").trim().padStart(7, '0') || "번호 미상";
+
+        return {
+            elevatorNo: safeElevatorNo,
+            type: refinedType, 
+            speed: finalSpeed, 
+            floors: apiItem.shuttle_section || apiItem.shuttleSection || "-",
+            weight: finalWeight, 
+            capacity: finalCapacity, 
+            installPlace: String(apiItem.installation_place || apiItem.installationPlace || "-").trim(),
+            state: stts, 
+            isOperating: isOperating, 
+            scanned: false 
+        };
+    });
+    group.isDummy = false;
+    if (group.elevators.length === 0) group.noElevator = true;
+}
     async function executeMultiAddressSearch(event, addresses, placeName) {
         if (event && (event.type === 'touchend' || event.type === 'touchstart') && isTouchMoved) return;
         if (event) { event.preventDefault(); event.stopPropagation(); }
