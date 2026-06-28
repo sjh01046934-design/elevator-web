@@ -12,7 +12,7 @@ const PUBLIC_API_KEY = 'bf828022bb4535034959395893c59397fff91ac219c9367061057509
 const statusCache = new NodeCache({ stdTTL: 600 });
 
 const pool = new Pool({
-    connectionString: "postgresql://postgres.oiazhplvilthpanwceob:p2XEnK5UMVDjmk25@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres",
+    connectionString: "postgresql://postgres.oiazhplvilthpanwceob.supabase.com:6543/postgres",
     ssl: { rejectUnauthorized: false }
 });
 
@@ -40,7 +40,8 @@ app.get('/api/elevators', async (req, res) => {
 
             textTokens.forEach(token => {
                 if (token.length > 1) {
-                    conditions.push(`(A.address1 LIKE $${paramIdx} OR A.address2 LIKE $${paramIdx} OR A.건물명 LIKE $${paramIdx})`);
+                    // 💡 [컬럼명 반영] A.건물명 -> A.buld_nm 변경 및 building_address 검색 조건 확장
+                    conditions.push(`(A.building_address LIKE $${paramIdx} OR A.address1 LIKE $${paramIdx} OR A.address2 LIKE $${paramIdx} OR A.buld_nm LIKE $${paramIdx})`);
                     queryParams.push(`%${token}%`);
                     paramIdx++;
                 }
@@ -49,7 +50,7 @@ app.get('/api/elevators', async (req, res) => {
             numTokens.forEach(token => {
                 let match = token.match(/\d+/);
                 if (match) {
-                    conditions.push(`(A.address1 LIKE $${paramIdx} OR A.address2 LIKE $${paramIdx})`);
+                    conditions.push(`(A.building_address LIKE $${paramIdx} OR A.address1 LIKE $${paramIdx} OR A.address2 LIKE $${paramIdx})`);
                     queryParams.push(`%${match[0]}%`);
                     paramIdx++;
                 }
@@ -60,7 +61,7 @@ app.get('/api/elevators', async (req, res) => {
             const sql = `
                 SELECT A.*, B.위도, B.경도 
                 FROM elevators_raw A 
-                LEFT JOIN coords_raw B ON A.건물명 = B.건물명 
+                LEFT JOIN coords_raw B ON A.buld_nm = B.건물명 
                 WHERE ${conditions.join(' AND ')}
                 LIMIT 1500
             `;
@@ -70,8 +71,8 @@ app.get('/api/elevators', async (req, res) => {
             const sql = `
                 SELECT A.*, B.위도, B.경도 
                 FROM elevators_raw A 
-                LEFT JOIN coords_raw B ON A.건물명 = B.건물명 
-                WHERE A.건물명 LIKE $1
+                LEFT JOIN coords_raw B ON A.buld_nm = B.건물명 
+                WHERE A.buld_nm LIKE $1
                 LIMIT 1500
             `;
             result = await pool.query(sql, [`%${keyword}%`]);
@@ -94,8 +95,9 @@ app.get('/api/realtime-status', async (req, res) => {
     if (cachedStatus) return res.json({ status: cachedStatus }); 
 
     try {
-        const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
-        const response = await axios.get(apiUrl, { timeout: 3000 });
+        // 💡 [파라미터 버그 수정] elevatorNo= -> elevator_no= 변경 / 타임아웃 5초로 최적화
+        const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+        const response = await axios.get(apiUrl, { timeout: 5000 });
 
         if (typeof response.data === 'string' && response.data.includes('<errMsg>')) {
             return res.json({ status: "API키오류" }); 
@@ -106,7 +108,8 @@ app.get('/api/realtime-status', async (req, res) => {
 
         if (items) {
              const itemData = Array.isArray(items) ? items[0] : items;
-             currentStatus = itemData.elvtrStts || itemData.elvtrSttsNm || "상태알수없음"; 
+             // 공공데이터 명세 규격 바인딩 표준화
+             currentStatus = itemData.elvtrSttsNm || itemData.elvtrStts || "상태알수없음"; 
         }
 
         statusCache.set(safeElevatorNo, currentStatus);
@@ -117,5 +120,5 @@ app.get('/api/realtime-status', async (req, res) => {
 });
 
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index1.html')); });
-app.listen(3000, () => { console.log("🚀 백엔드 주소 매칭 엔진 가동!"); });
+app.listen(3000, () => { console.log("🚀 백엔드 주소 매칭 및 제원 분석 엔진 가동!"); });
 module.exports = app;
