@@ -758,7 +758,7 @@
         let finalWeight = weightNum ? weightNum + " kg" : "-";
         
         let speedNum = String(apiItem.rated_speed || apiItem.ratedSpeed || "").replace(/[^0-9.]/g, "");
-        let finalSpeed = speedNum ? speedNum + " m/min" : "-";
+        let finalSpeed = speedNum ? speedNum + " m/s" : "-";
         
         let capNum = String(apiItem.person_cnt || apiItem.prsonCnt || apiItem.personCnt || "").replace(/[^0-9]/g, "");
         let finalCapacity = "-";
