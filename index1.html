@@ -185,7 +185,6 @@
 
     let currentAbortController = null; 
 
-    // 수파베이스 접속 환경 설정
     const SUPABASE_URL = 'https://oiazhplvilthpanwceob.supabase.co'; 
     const SUPABASE_KEY = 'sb_publishable_A2z6rbSMv_O4GoMATLrfgQ_Ve86LL0G';
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -200,7 +199,6 @@
         "전북": "전북특별자치도", "전남": "전라남도", "경북": "경상북도", "경남": "경상남도", "제주": "제주특별자치도", "전국": ""
     };
 
-    // 💡 [과제 5] 광역 스캔용 전체 지역 데이터 복구 완료 (충청/경상/전라 등 누락 해소)
     const DISTRICT_MAP = {
         "서울": ["강남구","강동구","강북구","강서구","관악구","광진구","구로구","금천구","노원구","도봉구","동대문구","동작구","마포구","서대문구","서초구","성동구","성북구","송파구","양천구","영등포구","용산구","은평구","종로구","중구","중랑구"],
         "세종": ["조치원읍", "한솔동", "도담동", "아름동", "종촌동", "고운동", "보람동", "새롬동", "다정동", "나성동", "어진동", "반곡동", "소담동", "대평동", "해밀동", "연기면", "연동면", "부강면", "금남면", "장군면", "연서면", "전의면", "전동면", "소정면"],
@@ -220,6 +218,39 @@
         "경북": ["포항시", "경주시", "김천시", "안동시", "구미시", "영주시", "영천시", "상주시", "문경시", "경산시", "군위군", "의성군", "청송군", "영양군", "영덕군", "청도군", "고령군", "성주군", "칠곡군", "예천군", "봉화군", "울진군", "울릉군"],
         "경남": ["창원시", "진주시", "통영시", "사천시", "김해시", "밀양시", "거제시", "양산시", "의령군", "함안군", "창녕군", "고성군", "남해군", "하동군", "산청군", "함양군", "거창군", "합천군"]
     };
+
+    // ✅ [수정] elevatorNo 원본 보존 함수 (패딩 없이 원본 그대로 반환)
+    function normalizeElevatorNo(raw) {
+        const str = String(raw || "").trim();
+        // 숫자로만 이루어진 경우 정수 변환 후 문자열로 (앞의 0이 의미있는 경우 유지)
+        return str || "미상";
+    }
+
+    // ✅ [수정] ViewM 호출용 번호: API가 요구하는 패딩(7자리) 처리는 여기서만 수행
+    function padElevatorNo(elevatorNo) {
+        const str = String(elevatorNo || "").trim();
+        if (!str || str === "미상") return str;
+        // 이미 패딩된 경우(7자리 이상) 그대로, 아니면 7자리로
+        return str.length >= 7 ? str : str.padStart(7, '0');
+    }
+
+    // ✅ [수정] 상태값 표준화 함수 (중복 로직 통합)
+    function normalizeStateText(stateText, isOperating) {
+        if (!isOperating) return stateText;
+        if (!stateText || stateText === "합격" || stateText === "상태불명" || stateText === "상태알수없음"
+            || stateText.includes("정상") || stateText.includes("운행중")) {
+            return "정상운행";
+        }
+        return stateText;
+    }
+
+    // ✅ [수정] isOperating 판별 함수 통합
+    function calcIsOperating(stateText) {
+        const s = String(stateText || "");
+        return !(s.includes('정지') || s.includes('중지') || s.includes('불합격') || s.includes('고장')
+            || s.includes('폐기') || s.includes('휴지') || s.includes('검사연기')
+            || s.includes('폐지') || s.includes('확인불가'));
+    }
 
     function initMap() {
         const container = document.getElementById('map');
@@ -338,7 +369,6 @@
         return { searchKeyword: searchKeyword.trim(), address2: address2.trim() };
     }
 
-    // 💡 [과제 1, 4] 타지역 원천 차단 및 번지수 정밀 매칭 필터
     function filterValidElevators(items, borough, roadKeyword, roadNo, dongKeyword, jibunNo, selectedSido) {
         if (!items || items.length === 0) return [];
         
@@ -350,12 +380,10 @@
             let originalAddr = String(item.building_address || item.address1 || item.address || "");
             let addrStr = originalAddr.replace(/\s+/g, '').toLowerCase();
             
-            // 시도(Sido) 포함 여부 강제 확인 (천안 등 엉뚱 지역 방어망)
             if (sidoPrefix && !(originalAddr.includes(sidoPrefix) || (item.sido && String(item.sido).includes(sidoPrefix)))) {
                 return false; 
             }
             
-            // 번지수 등 정밀 확인 로직 보완 (건국클래식점 오류 해결)
             const matchNumber = (numStr) => {
                 if (!numStr) return true;
                 const regex = new RegExp(`[^0-9]${numStr}([^0-9]|$)`);
@@ -394,12 +422,10 @@
         return filterValidElevators(combinedItems, null, rParamsFallback.searchKeyword, rParamsFallback.address2, null, null, apiSido);
     }
 
-    // 💡 [과제 3] 공공데이터 도로명 파라미터 분할 금지 (황산벌로1098번길 61-26 복구)
     async function requestPublicElevatorList(apiSido, queryText, signal, searchType) {
         let baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500`;
         if (apiSido && apiSido !== "전국") baseUrl += `&sido=${encodeURIComponent(apiSido)}`;
         
-        // 공공데이터 API는 통짜 주소를 그대로 밀어넣어야 가장 정확합니다.
         if (searchType === 'building') {
             baseUrl += `&buld_nm=${encodeURIComponent(queryText)}`;
         } else {
@@ -437,7 +463,6 @@
         return list;
     }
 
-    // 💡 [과제 4] 카카오 장소 검색 시 타지역 섞임 원천 차단
     function searchKakaoPlaces() {
         const query = document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
@@ -450,7 +475,6 @@
         let allPlaces = []; 
         places.keywordSearch(kakaoQuery, function(result, status, pagination) {
             if (status === kakao.maps.services.Status.OK) {
-                // 선택한 SIDO 앞 두 글자와 다르면 가차 없이 필터링! (천안 차단)
                 const filteredResult = result.filter(p => sido === "전국" || (p.road_address_name || p.address_name).includes(sido.substring(0, 2)));
                 if(filteredResult.length > 0) allPlaces.push(...filteredResult);
                 
@@ -673,6 +697,7 @@
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
     }
 
+    // ✅ [수정 1] buildGlobalGroups: elevatorNo를 원본 그대로 저장 (padStart 제거)
     function buildGlobalGroups() {
         const groupedMap = new Map();
 
@@ -694,9 +719,10 @@
             }
 
             const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
-            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
+            const isOperating = calcIsOperating(stts);
             
-            const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
+            const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); 
+            let refinedType = "승객용"; 
             if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
             else if (rawType.includes("에스컬레이터")) refinedType = "에스컬레이터";
             else if (rawType.includes("무빙워크")) refinedType = "무빙워크";
@@ -717,18 +743,23 @@
             else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
             if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
-            const safeElevatorNo = String(apiItem.elevatorNo || apiItem.elevator_no || "").trim().padStart(7, '0') || "미상";
+            // ✅ [수정 1-핵심] elevatorNo 원본 보존 (padStart 제거 → ViewM 조회시 정확한 번호 전달)
+            const rawNo = normalizeElevatorNo(apiItem.elevatorNo || apiItem.elevator_no);
 
-            // 💡 [과제 6] '01월03일' -> '1-3' 등으로 엑셀 오염 데이터 정규화 복원
             let cleanInstallPlace = String(apiItem.installationPlace || apiItem.installation_place || "-").trim();
             cleanInstallPlace = cleanInstallPlace.replace(/(?:^|\s)0?(\d+)월\s*0?(\d+)일?(?:\s|$)/g, '$1-$2');
 
             groupedMap.get(key).elevators.push({
-                elevatorNo: safeElevatorNo, type: refinedType, speed: finalSpeed, 
+                elevatorNo: rawNo,          // ← 원본 번호 저장
+                type: refinedType,
+                speed: finalSpeed, 
                 shuttleSection: apiItem.shuttleSection || apiItem.shuttle_section || "확인중⏳",
-                weight: finalWeight, capacity: finalCapacity, 
+                weight: finalWeight,
+                capacity: finalCapacity, 
                 installPlace: cleanInstallPlace,
-                state: stts, isOperating: isOperating, scanned: false 
+                state: stts,               // ← ListM에서 가져온 상태값 저장
+                isOperating: isOperating,
+                scanned: false 
             });
         });
 
@@ -825,7 +856,7 @@
 
         group.elevators = elevs.map(apiItem => {
             const stts = String(apiItem.elvtr_stts_nm || apiItem.elvtrSttsNm || apiItem.elvtrStts || "상태불명").trim();
-            const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
+            const isOperating = calcIsOperating(stts);
             
             const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); 
             let refinedType = "승객용"; 
@@ -849,17 +880,23 @@
             else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
             if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
-            const safeElevatorNo = String(apiItem.elevator_no || apiItem.elevatorNo || "").trim().padStart(7, '0') || "미상";
+            // ✅ [수정] hydrateDummyGroup도 원본 번호 보존
+            const rawNo = normalizeElevatorNo(apiItem.elevator_no || apiItem.elevatorNo);
             
             let cleanInstallPlace = String(apiItem.installation_place || apiItem.installationPlace || "-").trim();
             cleanInstallPlace = cleanInstallPlace.replace(/(?:^|\s)0?(\d+)월\s*0?(\d+)일?(?:\s|$)/g, '$1-$2');
 
             return {
-                elevatorNo: safeElevatorNo, type: refinedType, speed: finalSpeed, 
+                elevatorNo: rawNo,
+                type: refinedType,
+                speed: finalSpeed, 
                 shuttleSection: apiItem.shuttle_section || apiItem.shuttleSection || "확인중⏳",
-                weight: finalWeight, capacity: finalCapacity, 
+                weight: finalWeight,
+                capacity: finalCapacity, 
                 installPlace: cleanInstallPlace,
-                state: stts, isOperating: isOperating, scanned: false 
+                state: stts,           // ← ListM 상태값 보존
+                isOperating: isOperating,
+                scanned: false 
             };
         });
         group.isDummy = false;
@@ -875,7 +912,6 @@
         const listContainer = document.getElementById('elevatorListContainer');
         document.getElementById('bottomSheet').classList.add('active');
         
-        // 💡 [과제 2] 마커가 덜 가려지게 화면 중앙 정렬 미세 조율
         map.panTo(new kakao.maps.LatLng(groupData.lat - 0.001, groupData.lng));
 
         if (groupData.noElevator) {
@@ -899,19 +935,19 @@
 
         let listHtml = '';
         groupData.elevators.forEach((elv, index) => {
-            const initialText = elv.scanned ? elv.state : "조회중...⏳";
-            const badgeBg = elv.scanned ? (elv.isOperating ? "#1e4e79" : "#d32f2f") : "#94a3b8";
-            
-            let displayStateText = initialText;
-            // 💡 [과제 7] '운행중' 텍스트를 '정상운행'으로 깔끔하게 통일
-            if (elv.scanned && elv.isOperating && (displayStateText === "합격" || displayStateText === "상태불명" || displayStateText.includes("정상") || displayStateText === "상태알수없음" || displayStateText.includes("운행중"))) {
-                displayStateText = "정상운행";
-            }
+            // ✅ [수정 2] ListM 상태값을 즉시 뱃지에 표시 (ViewM 응답 전에도 의미있는 값 보여줌)
+            const hasListMState = elv.state && elv.state !== "상태불명" && elv.state !== "";
+            const initialText = hasListMState
+                ? normalizeStateText(elv.state, elv.isOperating)
+                : "조회중...⏳";
+            const badgeBg = hasListMState
+                ? (elv.isOperating ? "#1e4e79" : "#d32f2f")
+                : "#94a3b8";
 
             const tableHtml = `
                 <div class="elv-item-title">
                     <span>#${index + 1} 호기 <span style="font-weight:normal; color:#777; font-size:11px; margin-left:4px;">(${elv.elevatorNo})</span></span>
-                    <span id="status-${elv.elevatorNo}" class="status-badge" style="background:${badgeBg};">${displayStateText}</span>
+                    <span id="status-${elv.elevatorNo}" class="status-badge" style="background:${badgeBg};">${initialText}</span>
                 </div>
                 <table class="data-table">
                     <tr><th>승강기종류</th><td style="font-weight:bold;">${elv.type}</td><th>운행구간</th><td id="shuttle-${elv.elevatorNo}">${elv.shuttleSection}</td></tr>
@@ -927,53 +963,72 @@
 
         listContainer.innerHTML = listHtml;
 
-        // 💡 [과제 1, 2, 3] 상세조회(ViewM)를 100ms 딜레이로 순차 개별 호출하여 공공데이터 누락 절대 방지
+        // ✅ [수정 3] ViewM 호출: 이미 스캔된 항목 건너뛰고, 실패 시 ListM 상태값으로 폴백
         groupData.elevators.forEach(async (elv, index) => {
             if (elv.scanned) return; 
             
             await new Promise(resolve => setTimeout(resolve, index * 100)); 
             
+            // ✅ [수정 3-핵심] ViewM 호출 시에만 padElevatorNo로 7자리 패딩 처리
+            const paddedNo = padElevatorNo(elv.elevatorNo);
+
             try {
-                const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') 
+                    + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${paddedNo}&_type=json`;
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
                 const data = await res.json();
                 
-                let displayStateText = "상태알수없음";
+                let displayStateText = elv.state || "상태알수없음"; // ← ViewM 실패 대비 기본값을 ListM값으로
                 let shuttleSec = elv.shuttleSection; 
 
                 if (data.response?.body?.items?.item) {
-                    let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
-                    displayStateText = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || "상태불명";
-                    if(item.shuttleSection || item.shuttle_section) {
+                    let item = Array.isArray(data.response.body.items.item) 
+                        ? data.response.body.items.item[0] 
+                        : data.response.body.items.item;
+                    // ViewM 성공 시 최신 상태로 교체
+                    displayStateText = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || displayStateText;
+                    if (item.shuttleSection || item.shuttle_section) {
                         shuttleSec = item.shuttleSection || item.shuttle_section;
                     }
                 }
 
-                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
+                const isOperating = calcIsOperating(displayStateText);
                 
                 elv.scanned = true;
                 elv.isOperating = isOperating; 
                 elv.state = displayStateText;
                 elv.shuttleSection = shuttleSec;
 
+                // m/min → m/s 단위 보정
                 let speedVal = parseFloat(elv.speed);
-                if (!isNaN(speedVal) && String(elv.speed).includes("m/min")) { elv.speed = (speedVal / 60).toFixed(1) + " m/s"; }
+                if (!isNaN(speedVal) && String(elv.speed).includes("m/min")) { 
+                    elv.speed = (speedVal / 60).toFixed(1) + " m/s"; 
+                }
 
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
                 if (statusEl) {
-                    const badgeBg = isOperating ? "#1e4e79" : "#d32f2f";
-                    let finalText = displayStateText;
-                    if (isOperating && (finalText === "합격" || finalText === "상태불명" || finalText.includes("정상") || finalText === "상태알수없음" || finalText.includes("운행중"))) { finalText = "정상운행"; }
-                    statusEl.style.background = badgeBg; statusEl.innerText = finalText;
+                    statusEl.style.background = isOperating ? "#1e4e79" : "#d32f2f";
+                    statusEl.innerText = normalizeStateText(displayStateText, isOperating);
                 }
 
                 const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
                 if (shuttleEl) shuttleEl.innerText = shuttleSec;
 
             } catch(e) {
+                // ✅ [수정 3-폴백] ViewM 통신 실패 시 ListM에서 가져온 상태값으로 표시
+                elv.scanned = true; // 재시도 방지
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-                if (statusEl) { statusEl.style.background = "#d32f2f"; statusEl.innerText = "통신오류"; }
+                if (statusEl) {
+                    const fallbackState = elv.state || "";
+                    const fallbackOperating = calcIsOperating(fallbackState);
+                    if (fallbackState && fallbackState !== "상태불명") {
+                        statusEl.style.background = fallbackOperating ? "#1e4e79" : "#d32f2f";
+                        statusEl.innerText = normalizeStateText(fallbackState, fallbackOperating);
+                    } else {
+                        statusEl.style.background = "#94a3b8"; 
+                        statusEl.innerText = "조회불가";
+                    }
+                }
             }
         });
     }
