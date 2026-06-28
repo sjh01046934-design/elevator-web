@@ -9,7 +9,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <style>
-        /* 🎨 UI/UX 외형 다듬기: 모던하고 깔끔한 스타일 적용 */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background-color: #f0f2f5; display: flex; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
         .app-container { width: 100%; max-width: 412px; height: 100vh; background-color: #e5e5e5; position: relative; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.15); }
@@ -200,11 +199,18 @@
         "전북": "전북특별자치도", "전남": "전라남도", "경북": "경상북도", "경남": "경상남도", "제주": "제주특별자치도", "전국": ""
     };
 
+    // 💡 전체 지역 맵 복구 완료
     const DISTRICT_MAP = {
-        "세종": ["조치원읍", "한솔동", "도담동", "아름동", "종촌동", "고운동", "보람동", "새롬동", "다정동", "나성동", "어진동", "반곡동", "소담동", "대평동", "해밀동", "연기면", "연동면", "부강면", "금남면", "장군면", "연서면", "전의면", "전동면", "소정면"],
         "서울": ["강남구","강동구","강북구","강서구","관악구","광진구","구로구","금천구","노원구","도봉구","동대문구","동작구","마포구","서대문구","서초구","성동구","성북구","송파구","양천구","영등포구","용산구","은평구","종로구","중구","중랑구"],
-        "경기": ["수원시", "성남시", "의정부시", "안양시", "부천시", "광명시", "평택시", "동두천시", "안산시", "고양시", "과천시", "구리시", "남양주시", "오산시", "시흥시", "군포시", "의왕시", "하남시", "용인시", "파주시", "이천시", "안성시", "김포시", "화성시", "광주시", "양주시", "포천시", "여주시", "연천군", "가평군", "양평군"]
-        // 기타 지역 생략 (기존과 동일)
+        "세종": ["조치원읍", "한솔동", "도담동", "아름동", "종촌동", "고운동", "보람동", "새롬동", "다정동", "나성동", "어진동", "반곡동", "소담동", "대평동", "해밀동", "연기면", "연동면", "부강면", "금남면", "장군면", "연서면", "전의면", "전동면", "소정면"],
+        "경기": ["수원시", "성남시", "의정부시", "안양시", "부천시", "광명시", "평택시", "동두천시", "안산시", "고양시", "과천시", "구리시", "남양주시", "오산시", "시흥시", "군포시", "의왕시", "하남시", "용인시", "파주시", "이천시", "안성시", "김포시", "화성시", "광주시", "양주시", "포천시", "여주시", "연천군", "가평군", "양평군"],
+        "인천": ["중구", "동구", "미추홀구", "연수구", "남동구", "부평구", "계양구", "서구", "강화군", "옹진군"],
+        "부산": ["중구", "서구", "동구", "영도구", "부산진구", "동래구", "남구", "북구", "해운대구", "사하구", "금정구", "강서구", "연제구", "수영구", "사상구", "기장군"],
+        "대구": ["중구", "동구", "서구", "남구", "북구", "수성구", "달서구", "달성군", "군위군"],
+        "대전": ["동구", "중구", "서구", "유성구", "대덕구"],
+        "광주": ["동구", "서구", "남구", "북구", "광산구"],
+        "울산": ["중구", "남구", "동구", "북구", "울주군"],
+        "제주": ["제주시", "서귀포시"]
     };
 
     function initMap() {
@@ -324,35 +330,27 @@
         return { searchKeyword: searchKeyword.trim(), address2: address2.trim() };
     }
 
-    // 🚀 [타 지역 유입 차단 및 공백 무시 검색 정밀화]
     function filterValidElevators(items, borough, roadKeyword, roadNo, dongKeyword, jibunNo, selectedSido) {
         if (!items || items.length === 0) return [];
         
         const rClean = roadKeyword ? roadKeyword.replace(/\s+/g, '').toLowerCase() : "";
         const rNum = roadNo ? roadNo.replace(/[^0-9]/g, '') : "";
-        const sidoPrefix = selectedSido ? selectedSido.substring(0, 2) : ""; // '세종', '서울' 등
+        const sidoPrefix = selectedSido ? selectedSido.substring(0, 2) : ""; 
 
         return items.filter(item => {
-            // 💡 1. 수파베이스 영문 컬럼(building_address) 우선 체크 및 띄어쓰기 완전 무시
             let addrStr = String(item.building_address || item.address1 || item.address || "").replace(/\s+/g, '').toLowerCase();
-            
-            // 💡 2. 타 지역 데이터 원천 차단 (예: 세종 검색 시 서울 데이터 버림)
             if (sidoPrefix && !String(item.building_address || item.address1 || item.address || "").startsWith(sidoPrefix)) {
                 return false; 
             }
-
-            // 도로명 + 번지수로 결합된 문자열 확인
             if (rClean && addrStr.includes(rClean) && (!rNum || addrStr.includes(rNum))) return true;
             return false;
         });
     }
 
-    // 🚀 [수파베이스 직접 스캔 (번역기 제거)]
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
         showLoadingMsg(`⏳ Supabase 자산 DB에서 정밀 매핑 정보 조회 중...`);
         try {
             const rParams = extractAddressParams(roadAddr);
-            // 도로명 패턴 생성 -> "%나성동로%6%"
             let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : "";
             if (rParams.searchKeyword && rParams.address2) {
                 let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
@@ -368,16 +366,14 @@
             }
         } catch (e) { console.warn("Supabase 에러:", e.message); }
 
-        // --- 공공데이터 Fallback ---
         const rParamsFallback = extractAddressParams(roadAddr);
         let combinedItems = [];
         if (rParamsFallback.searchKeyword) {
-            combinedItems = await requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal);
+            combinedItems = await requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword, signal, 'address');
         }
         return filterValidElevators(combinedItems, null, rParamsFallback.searchKeyword, rParamsFallback.address2, null, null, apiSido);
     }
 
-    // 🚀 [429 에러 방지 순차 호출]
     async function requestPublicElevatorList(apiSido, address1, signal, searchType) {
         let baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500&sido=${encodeURIComponent(apiSido)}`;
         if (searchType === 'building') baseUrl += `&buld_nm=${encodeURIComponent(address1)}`;
@@ -397,7 +393,7 @@
                 let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
                 if (maxPages > 1) {
                     for (let p = 2; p <= maxPages; p++) {
-                        await new Promise(resolve => setTimeout(resolve, 250)); // 지연 속도 최적화
+                        await new Promise(resolve => setTimeout(resolve, 250)); 
                         try {
                             let pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
                             if (pageRes.ok) {
@@ -489,7 +485,6 @@
         allPlaces.forEach(p => { const addr = p.road_address_name || p.address_name; if (addr && !uniquePlaces.has(addr)) uniquePlaces.set(addr, p); });
         let placeArray = Array.from(uniquePlaces.values());
         
-        // 💡 [개선] 결과 0건 시 지도 초기화 방지
         if (placeArray.length === 0) { hideLoadingMsg(); alert(`검색된 데이터가 없습니다.`); return; }
 
         lastQuery = keyword; lastSido = sido; globalGroups = []; allElevatorsData = []; clusterer.clear(); hideLoadingMsg();
@@ -527,11 +522,10 @@
             });
 
             let filteredItems = Array.from(uniqueMap.values()).filter(apiItem => {
-                const type = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); // 영문 컬럼 반영
+                const type = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
             });
 
-            // 💡 [개선] 결과 0건 시 지도 초기화 방지
             if (filteredItems.length === 0) { hideLoadingMsg(); alert(`승강기 데이터를 찾을 수 없습니다.`); return; }
 
             lastQuery = placeName; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
@@ -564,7 +558,6 @@
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
             });
 
-            // 💡 [개선] 결과 0건 시 지도 초기화 방지
             if (filteredItems.length === 0) { hideLoadingMsg(); alert("승객용 승강기가 미설치된 건물입니다."); return; }
 
             lastQuery = placeName; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
@@ -572,7 +565,7 @@
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("서버 통신 에러"); } }
     }
 
-    // 🚀 [검색 독립화] 도로명/건물명 검색은 오직 공공데이터 API로 직행
+    // 🚀 [검색 독립화 및 2차 필터 복구] 
     async function executeBroadSearch() {
         const query = document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
@@ -585,10 +578,20 @@
         const apiSido = FULL_SIDO_MAP[sido] || sido;
 
         try {
-            // 도로명이든 건물명이든 공공데이터 API를 직접 호출 (카카오 무시)
             let items = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
 
-            let filteredItems = items.filter(apiItem => {
+            // 💡 [핵심 복구] 공공데이터 과다 응답 방지 2차 정밀 필터
+            const queryNoSpace = query.replace(/\s+/g, '').toLowerCase(); 
+            let validItems = items.filter(item => {
+                if (searchType === 'building') {
+                    return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                } else {
+                    const params = extractAddressParams(query);
+                    return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
+                }
+            });
+
+            let filteredItems = validItems.filter(apiItem => {
                 const type = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
             });
@@ -597,10 +600,8 @@
             filteredItems.forEach(item => { const elvNo = item.elevatorNo; if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item); });
             filteredItems = Array.from(uniqueMap.values());
 
-            // 💡 [개선] 결과 0건 시 지도 초기화 방지
             if (filteredItems.length === 0) { hideLoadingMsg(); alert(`검색 결과가 존재하지 않습니다.`); return; }
 
-            // 데이터가 확보된 경우에만 리셋
             lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
             buildGlobalGroups();
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
@@ -611,7 +612,6 @@
 
         allElevatorsData.forEach(apiItem => {
             const buldNm = apiItem.customBuldNm || apiItem.buldNm || apiItem.buld_nm || "건물명 없음";
-            // 💡 [영문 컬럼 대응] building_address 매핑 누락 수정
             const addr1 = String(apiItem.building_address || apiItem.address1 || apiItem.address || ""); 
             const addr2 = String(apiItem.address2 || "");
             const address = (addr1 + " " + addr2).trim() || "주소 없음"; 
@@ -630,7 +630,6 @@
             const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
             
-            // 💡 [영문 컬럼 대응] 승강기 종류 매핑
             const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
             if (rawType.includes("장애") && rawType.includes("휠체어") && rawType.includes("화물") && rawType.includes("승객")) refinedType = "장애/승객화물용";
             else if (rawType.includes("에스컬레이터")) refinedType = "에스컬레이터";
@@ -656,7 +655,6 @@
 
             groupedMap.get(key).elevators.push({
                 elevatorNo: safeElevatorNo, type: refinedType, speed: finalSpeed, 
-                // 💡 [운행구간] DB 데이터가 있다면 가져오고 없으면 확인중 표시
                 shuttleSection: apiItem.shuttleSection || apiItem.shuttle_section || "확인중⏳",
                 weight: finalWeight, capacity: finalCapacity, 
                 installPlace: String(apiItem.installationPlace || apiItem.installation_place || "-").trim(),
@@ -665,12 +663,17 @@
         });
 
         globalGroups = Array.from(groupedMap.values());
-        Promise.all(globalGroups.map(group => {
-            return new Promise((resolve) => {
+        
+        // 💡 [카카오 API 429 에러 방지 쉴드 적용]
+        Promise.all(globalGroups.map((group, index) => {
+            return new Promise(async (resolve) => {
                 if (group.lat && group.lng) { resolve(); return; }
                 if (geocodeCache.has(group.address)) {
                     const coords = geocodeCache.get(group.address); group.lat = coords.lat; group.lng = coords.lng; resolve(); return;
                 }
+                
+                await new Promise(res => setTimeout(res, index * 100)); // 0.1초 딜레이
+                
                 geocoder.addressSearch(group.address, function(result, status) {
                     if (status === kakao.maps.services.Status.OK) { group.lat = parseFloat(result[0].y); group.lng = parseFloat(result[0].x); } 
                     else { group.lat = 36.4800 + (Math.random() - 0.5) * 0.05; group.lng = 127.2890 + (Math.random() - 0.5) * 0.05; }
@@ -781,7 +784,6 @@
 
             return {
                 elevatorNo: safeElevatorNo, type: refinedType, speed: finalSpeed, 
-                // 💡 [운행구간] 초기 매핑
                 shuttleSection: apiItem.shuttle_section || apiItem.shuttleSection || "확인중⏳",
                 weight: finalWeight, capacity: finalCapacity, 
                 installPlace: String(apiItem.installation_place || apiItem.installationPlace || "-").trim(),
@@ -821,7 +823,6 @@
             }
         }
 
-        // 💡 [외형 다듬기] 운행구간 헤더 적용
         let listHtml = '';
         groupData.elevators.forEach((elv, index) => {
             const initialText = elv.scanned ? elv.state : "조회중...⏳";
@@ -851,11 +852,10 @@
 
         listContainer.innerHTML = listHtml;
 
-        // 💡 [운행구간 통합 및 속도 최적화] 429 에러 방지 순차 호출 병행
         groupData.elevators.forEach(async (elv, index) => {
             if (elv.scanned) return; 
             
-            await new Promise(resolve => setTimeout(resolve, index * 200)); // 조기 호출 최적화 (200ms)
+            await new Promise(resolve => setTimeout(resolve, index * 200)); 
             
             try {
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
@@ -869,7 +869,6 @@
                 if (data.response?.body?.items?.item) {
                     let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
                     displayStateText = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || "상태불명";
-                    // 💡 [운행구간 업데이트] 공공데이터 상세에서 운행구간 추출
                     if(item.shuttleSection || item.shuttle_section) {
                         shuttleSec = item.shuttleSection || item.shuttle_section;
                     }
@@ -877,7 +876,6 @@
 
                 const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
                 
-                // 데이터 제원 유지 & 상태만 덮어쓰기
                 elv.scanned = true;
                 elv.isOperating = isOperating; 
                 elv.state = displayStateText;
@@ -894,7 +892,6 @@
                     statusEl.style.background = badgeBg; statusEl.innerText = finalText;
                 }
 
-                // 운행구간 UI 실시간 반영
                 const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
                 if (shuttleEl) shuttleEl.innerText = shuttleSec;
 
