@@ -574,36 +574,73 @@
         if (query === '') { alert("검색어를 입력해주세요."); return; }
         closeDropdown(); closeBottomSheet(); cancelSearch(); currentAbortController = new AbortController();
         
-        saveRecentSearch(sido, query); showLoadingMsg("⏳ 공공데이터 직접 조회 중...");
+        saveRecentSearch(sido, query); showLoadingMsg("⏳ 자산 DB 초고속 정밀 스캔 중...");
         const apiSido = FULL_SIDO_MAP[sido] || sido;
+        const queryNoSpace = query.replace(/\s+/g, '').toLowerCase(); 
 
         try {
-            let items = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
-
-            // 💡 [핵심 복구] 공공데이터 과다 응답 방지 2차 정밀 필터
-            const queryNoSpace = query.replace(/\s+/g, '').toLowerCase(); 
-            let validItems = items.filter(item => {
-                if (searchType === 'building') {
-                    return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
-                } else {
-                    const params = extractAddressParams(query);
-                    return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
+            let dbItems = [];
+            let validItems = [];
+            
+            // 💡 1단계: 수파베이스에서 완벽하고 빠른 SQL 쿼리로 먼저 찾습니다. (산울2로 버그 원천 차단)
+            if (searchType === 'building') {
+                const { data } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
+                if (data) dbItems = data;
+            } else {
+                const rParams = extractAddressParams(query);
+                let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : `%${query}%`;
+                if (rParams.searchKeyword && rParams.address2) {
+                    let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
+                    rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
                 }
-            });
+                const { data } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(500);
+                if (data) dbItems = data;
+            }
 
+            // 수파베이스 데이터 깐깐하게 2차 필터링
+            if (dbItems.length > 0) {
+                validItems = dbItems.filter(item => {
+                    if (searchType === 'building') {
+                        return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                    } else {
+                        const params = extractAddressParams(query);
+                        return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
+                    }
+                });
+            }
+
+            // 💡 2단계: 만약 수파베이스에 최신 데이터가 없다면? 그때만 공공데이터 백업 서버를 뒤집니다.
+            if (validItems.length === 0) {
+                showLoadingMsg("⏳ 공공데이터 백업 서버 연결 중...");
+                let items = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
+                
+                validItems = items.filter(item => {
+                    if (searchType === 'building') {
+                        return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                    } else {
+                        const params = extractAddressParams(query);
+                        return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
+                    }
+                });
+            }
+
+            // 화물용/덤웨이터 등 불필요 데이터 최종 제거
             let filteredItems = validItems.filter(apiItem => {
-                const type = String(apiItem.elvtrKindNm || apiItem.elvtrDivNm || "");
+                const type = String(apiItem.elvtrKindNm || apiItem.elvtr_kind_nm || apiItem.elvtrDivNm || "");
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
             });
 
+            // 승강기 고유번호 중복 제거
             const uniqueMap = new Map();
-            filteredItems.forEach(item => { const elvNo = item.elevatorNo; if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item); });
+            filteredItems.forEach(item => { const elvNo = item.elevatorNo || item.elevator_no; if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item); });
             filteredItems = Array.from(uniqueMap.values());
 
             if (filteredItems.length === 0) { hideLoadingMsg(); alert(`검색 결과가 존재하지 않습니다.`); return; }
 
+            // 최종 지도 렌더링
             lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
             buildGlobalGroups();
+
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
     }
 
