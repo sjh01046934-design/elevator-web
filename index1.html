@@ -738,7 +738,7 @@
     group.elevators = elevs.map(apiItem => {
         // 💡 [운행상태] 영문 컬럼명 elvtr_stts_nm 반영
         const stts = String(apiItem.elvtr_stts_nm || apiItem.elvtrSttsNm || apiItem.elvtrStts || "상태불명").trim();
-        const isOperating = !(stts.includes('정지') || stts.includes('중지') || 단includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
+       const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
         
         // 💡 [종류 매핑] 영문 컬럼명 elvtr_kind_nm 반영
         const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); 
