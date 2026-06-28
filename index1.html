@@ -416,38 +416,39 @@
     }
 
     function filterValidElevators(items, borough, roadKeyword, roadNo, dongKeyword, jibunNo) {
-        if (!items || items.length === 0) return [];
-        
-        const bClean = borough ? borough.replace(/\s+/g, '').toLowerCase() : "";
-        const rClean = roadKeyword ? roadKeyword.replace(/\s+/g, '').toLowerCase() : "";
-        const dClean = dongKeyword ? dongKeyword.replace(/\s+/g, '').toLowerCase() : "";
-        const rNum = parseAddressNumber(roadNo);
-        const jNum = parseAddressNumber(jibunNo);
+    if (!items || items.length === 0) return [];
+    
+    const bClean = borough ? borough.replace(/\s+/g, '').toLowerCase() : "";
+    const rClean = roadKeyword ? roadKeyword.replace(/\s+/g, '').toLowerCase() : "";
+    const dClean = dongKeyword ? dongKeyword.replace(/\s+/g, '').toLowerCase() : "";
+    const rNum = parseAddressNumber(roadNo);
+    const jNum = parseAddressNumber(jibunNo);
 
-        return items.filter(item => {
-            let addr1 = String(item.address1 || item.address || "");
-            let addr2 = String(item.address2 || "");
-            let fullStr = (addr1 + " " + addr2).replace(/\s+/g, '').toLowerCase();
+    return items.filter(item => {
+        // 💡 [핵심 수정] 수파베이스의 새 영문 컬럼명인 building_address를 가장 먼저 찾도록 안전장치 추가
+        let addr1 = String(item.building_address || item.address1 || item.address || "");
+        let addr2 = String(item.address2 || "");
+        let fullStr = (addr1 + " " + addr2).replace(/\s+/g, '').toLowerCase();
 
-            if (bClean && !fullStr.includes(bClean)) return false;
+        if (bClean && !fullStr.includes(bClean)) return false;
 
-            const matchNumber = (targetNum) => {
-                if (!targetNum) return false;
-                let numRegex = new RegExp(`(?:^|[^0-9])${targetNum.main}(?:[^0-9]|$)`);
-                if (!numRegex.test(addr1 + " " + addr2)) return false;
-                
-                if (targetNum.sub > 0) {
-                    return fullStr.includes(`${targetNum.main}-${targetNum.sub}`) || fullStr.includes(`${targetNum.main}번지${targetNum.sub}`);
-                }
-                return true;
-            };
+        const matchNumber = (targetNum) => {
+            if (!targetNum) return false;
+            let numRegex = new RegExp(`(?:^|[^0-9])${targetNum.main}(?:[^0-9]|$)`);
+            if (!numRegex.test(addr1 + " " + addr2)) return false;
+            
+            if (targetNum.sub > 0) {
+                return fullStr.includes(`${targetNum.main}-${targetNum.sub}`) || fullStr.includes(`${targetNum.main}번지${targetNum.sub}`);
+            }
+            return true;
+        };
 
-            if (rClean && fullStr.includes(rClean) && matchNumber(rNum)) return true;
-            if (dClean && fullStr.includes(dClean) && matchNumber(jNum)) return true;
+        if (rClean && fullStr.includes(rClean) && matchNumber(rNum)) return true;
+        if (dClean && fullStr.includes(dClean) && matchNumber(jNum)) return true;
 
-            return false;
-        });
-    }
+        return false;
+    });
+}
 
     // 🚀 [번역기 도입 완료] 수파베이스의 한글 컬럼 데이터를 자바스크립트 표준 규격으로 변환
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
