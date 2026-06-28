@@ -263,7 +263,7 @@
                         document.getElementById('sidoSelector').value = sidoMap[rawSido] || rawSido.substring(0,2);
                         executeBroadSearch(); 
                     } else {
-                        hideLoadingMsg(); alert("해당 위치의 주소를 파악할 수 가 없습니다.");
+                        hideLoadingMsg(); alert("해당 위치의 주소를 파악할 수 없습니다.");
                     }
                 } else {
                     hideLoadingMsg();
@@ -461,7 +461,7 @@
             let dbItems = [];
             let error = null;
 
-            // 💡 [핵심] 수파베이스에서 가져온 데이터를 JS 필터가 이해하도록 영어로 번역해주는 어댑터 (0 채우기 포함)
+            // 수파베이스에서 가져온 데이터를 JS 필터가 이해하도록 영어로 번역해주는 어댑터 (0 채우기 포함)
             const mapSupabaseToStandard = (rows) => {
                 return rows.map(row => {
                     let rawElvNo = String(row['승강기고유번호'] || row.elevator_no || row.elevatorNo || "");
@@ -477,7 +477,7 @@
                 });
             };
 
-            // 1차: 도로명 스캔
+            // 1차: 도로명 스캔 (building_address 기준)
             if (rParams.searchKeyword) {
                 const { data, err } = await supabaseClient
                     .from('elevators_raw')
@@ -566,7 +566,6 @@
                 let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
                 
                 if (maxPages > 1) {
-                    // 💡 [핵심] 0.3초 대기하며 안전하게 징검다리 호출
                     for (let p = 2; p <= maxPages; p++) {
                         await new Promise(resolve => setTimeout(resolve, 300));
                         
@@ -706,7 +705,6 @@
         });
 
         renderData(); 
-        startBackgroundSync(); 
     }
 
     async function hydrateDummyGroup(group, signal) {
@@ -758,7 +756,6 @@
             else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
             if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
-            // 💡 0 패딩 처리 완료
             const safeElevatorNo = String(apiItem.elevatorNo || apiItem.elevator_no || "").trim().padStart(7, '0') || "번호 미상";
 
             return {
@@ -933,7 +930,7 @@
 
             hideLoadingMsg(); currentAbortController = null;
             if (allElevatorsData.length === 0) { alert(`검색 결과가 존재하지 않습니다.`); return; }
-            buildGlobalGroups();
+            box = buildGlobalGroups();
         } catch (error) {
             currentAbortController = null; if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); }
         }
@@ -981,7 +978,6 @@
             else if (weightNum && parseInt(weightNum) > 0) finalCapacity = Math.floor(parseInt(weightNum) / 75) + "명";
             if (refinedType === "에스컬레이터" || refinedType === "무빙워크") finalCapacity = "-";
 
-            // 💡 0 패딩 처리 완료
             const safeElevatorNo = String(apiItem.elevatorNo || apiItem.elevator_no || "").trim().padStart(7, '0') || "번호 미상";
 
             groupedMap.get(key).elevators.push({
@@ -1005,10 +1001,11 @@
                     geocodeCache.set(group.address, {lat: group.lat, lng: group.lng}); resolve();
                 });
             });
-        })).then(() => { renderData(); startBackgroundSync(); });
+        })).then(() => { renderData(); });
     }
 
-    function renderData(isBackgroundUpdate = false) {
+    // 🚀 [수정됨] 마커 초기 시점 상태 조회를 제거하여 맵 지연 현상 100% 최적화 타파
+    function renderData() {
         let renderList = [...globalGroups];
         const queryLower = lastQuery.replace(/\s+/g, '').toLowerCase();
         const getScore = (g) => {
@@ -1026,9 +1023,6 @@
         renderList.forEach(group => {
             if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
             
-            const stoppedCount = group.isDummy ? 0 : group.elevators.filter(e => !e.isOperating).length;
-            const isAllStopped = !group.isDummy && !group.noElevator && group.elevators.length > 0 && stoppedCount === group.elevators.length;
-            
             const content = document.createElement('div');
             
             if (group.noElevator) {
@@ -1038,12 +1032,8 @@
                 content.className = 'custom-marker dummy';
                 content.innerHTML = `<span>${group.buildingName}</span><span style="background:#eee; color:#777; padding:1px 4px; border-radius:4px; margin-left:4px; font-size:10.5px;">스캔대기</span>`;
             } else {
-                content.className = isAllStopped ? 'custom-marker stopped' : 'custom-marker';
-                let badge = '';
-                if (stoppedCount > 0) {
-                    badge = `<span style="background: white; color: #d32f2f; padding: 1px 4px; border-radius: 4px; margin-left: 4px; font-size: 10.5px; font-weight: 900; box-shadow: 0 1px 2px rgba(0,0,0,0.2);">정지/연기 ${stoppedCount}대</span>`;
-                }
-                content.innerHTML = `<span>${group.buildingName} (${group.elevators.length}대)</span>` + badge;
+                content.className = 'custom-marker';
+                content.innerHTML = `<span>${group.buildingName} (${group.elevators.length}대)</span>`;
             }
 
             content.onclick = function(event) { if (event) event.stopPropagation(); openBottomSheet(group); };
@@ -1060,16 +1050,15 @@
         
         clusterer.addMarkers(newOverlays);
         
-        if (!isBackgroundUpdate) {
-            if (renderList.length === 1) {
-                map.setLevel(5); setTimeout(() => { map.panTo(new kakao.maps.LatLng(renderList[0].lat, renderList[0].lng)); }, 100);
-            } else if (renderList.length > 1) {
-                let bounds = new kakao.maps.LatLngBounds(); newOverlays.forEach(overlay => { bounds.extend(overlay.getPosition()); });
-                setTimeout(() => { map.setBounds(bounds); }, 100);
-            } 
-        }
+        if (renderList.length === 1) {
+            map.setLevel(5); setTimeout(() => { map.panTo(new kakao.maps.LatLng(renderList[0].lat, renderList[0].lng)); }, 100);
+        } else if (renderList.length > 1) {
+            let bounds = new kakao.maps.LatLngBounds(); newOverlays.forEach(overlay => { bounds.extend(overlay.getPosition()); });
+            setTimeout(() => { map.setBounds(bounds); }, 100);
+        } 
     }
 
+    // 🚀 [수정됨] 사용자 터치 마커 클릭 시점에만 동적으로 상태 조회를 쏘는 Lazy Loading 메커니즘
     async function openBottomSheet(groupData) {
         document.getElementById('resBuildingName').innerText = groupData.buildingName;
         document.getElementById('resAddress').innerText = groupData.address;
@@ -1089,9 +1078,9 @@
         document.getElementById('resTotalCount').innerText = groupData.isDummy ? "(스캔 대기중...)" : `(${groupData.elevators.length}대)`;
 
         if (groupData.isDummy) {
-            listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ Supabase 및 정부 실시간 상태 수집 중...<br><span style="font-size:12px; font-weight:normal; color:#666;">(잠시만 기다려주세요)</span></div>';
+            listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ Supabase 자산 정보 분석 중...<br><span style="font-size:12px; font-weight:normal; color:#666;">(잠시만 기다려주세요)</span></div>';
             await hydrateDummyGroup(groupData, new AbortController().signal);
-            renderData(true); 
+            renderData(); 
             document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
             if (groupData.noElevator || groupData.elevators.length === 0) {
                 listContainer.innerHTML = '<div style="text-align:center; padding: 20px; color:#d32f2f;">❌ 이 건물(매장)에는 조회 가능한 승객용 승강기가 등록되어 있지 않습니다.</div>';
@@ -1129,143 +1118,49 @@
 
         listContainer.innerHTML = listHtml;
 
-        let markerNeedsUpdate = false;
-        // 💡 1초 대기 (기존과 동일)
-        const fetchPromises = groupData.elevators.map(async (elv) => {
-
+        groupData.elevators.forEach(async (elv) => {
             if (elv.scanned) return; 
-
-            // 💡 1초 대기 추가
-
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
+            
             try {
-
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
-
                 
-
-                // 💡 단건 상세조회 주소(getElevatorViewM)로 정상 연동
-
+                // 단건 상세조회 주소(getElevatorViewM) 매핑 및 0 패딩 처리 반영
                 const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
-
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
-
                 const data = await res.json();
-
                 
-
                 let displayStateText = "상태알수없음";
-
                 if (data.response?.body?.items?.item) {
-
                     let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
-
                     displayStateText = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || "상태불명";
-
                 }
-
-
 
                 const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
-
                 
-
+                // 제원 파괴를 박멸하고 상태 필드들만 안전 변환 분할 가공
                 elv.scanned = true;
-
                 if (elv.isOperating !== isOperating || elv.state !== displayStateText) {
-
-                    elv.isOperating = isOperating; elv.state = displayStateText; markerNeedsUpdate = true;
-
+                    elv.isOperating = isOperating; 
+                    elv.state = displayStateText;
                 }
 
-
-
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-
                 if (statusEl) {
-
                     const finalColor = isOperating ? "#1e4e79" : "#d32f2f";
-
                     let finalText = displayStateText;
-
                     if (isOperating && (finalText === "합격" || finalText === "상태불명" || finalText.includes("정상") || finalText === "상태알수없음")) {
-
                         finalText = "정상운행";
-
                     }
-
                     statusEl.style.color = finalColor; statusEl.innerText = `[${finalText}]`;
-
                 }
-
             } catch(e) {
-
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-
                 if (statusEl) { statusEl.style.color = "#d32f2f"; statusEl.innerText = "[통신오류]"; }
-
             }
-
         });
-
-        Promise.all(fetchPromises).then(() => { if (markerNeedsUpdate) renderData(true); });
     }
 
     function closeBottomSheet() { document.getElementById('bottomSheet').classList.remove('active'); }
-
-    async function startBackgroundSync() {
-        if (backgroundSyncController) backgroundSyncController.abort();
-        backgroundSyncController = new AbortController(); const signal = backgroundSyncController.signal;
-
-        while (!signal.aborted) {
-            let targetGroup = null; let targetElv = null; const bounds = map.getBounds();
-
-            for (let group of globalGroups) {
-                if (group.lat && group.lng && bounds.contain(new kakao.maps.LatLng(group.lat, group.lng))) {
-                    if (group.isDummy && !group.noElevator) { targetGroup = group; break; }
-                    targetElv = group.elevators.find(e => !e.scanned); if (targetElv) { targetGroup = group; break; }
-                }
-            }
-            if (!targetGroup) {
-                for (let group of globalGroups) {
-                    if (group.isDummy && !group.noElevator) { targetGroup = group; break; }
-                    targetElv = group.elevators.find(e => !e.scanned); if (targetElv) { targetGroup = group; break; }
-                }
-            }
-            if (!targetGroup) { await new Promise(r => setTimeout(r, 2000)); continue; }
-
-            if (targetGroup.isDummy) {
-                await hydrateDummyGroup(targetGroup, signal);
-                renderData(true); await new Promise(r => setTimeout(r, 100)); continue;
-            }
-
-            try {
-                const safeElevatorNo = String(targetElv.elevatorNo).trim().padStart(7, '0');
-                
-                // 💡 단건 상세조회 주소(getElevatorViewM)로 정상 연동
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
-                const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl), { signal });
-                const data = await res.json(); 
-                
-                let stts = "상태알수없음";
-                if (data.response?.body?.items?.item) {
-                    let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
-                    stts = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || "상태불명";
-                }
-                
-                targetElv.scanned = true; 
-                
-                const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('휴지') || stts.includes('폐기') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
-                if (targetElv.isOperating !== isOperating || targetElv.state !== stts) {
-                    targetElv.isOperating = isOperating; targetElv.state = stts; renderData(true); 
-                }
-            } catch(e) {
-                if (e.name === 'AbortError') return; targetElv.scanned = true; 
-            }
-            await new Promise(r => setTimeout(r, 1500)); 
-        }
-    }
 
     window.onload = function() { kakao.maps.load(function() { initMap(); }); };
 </script>
