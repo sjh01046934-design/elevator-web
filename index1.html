@@ -185,6 +185,7 @@
 
     let currentAbortController = null; 
 
+    // 수파베이스 접속 환경 설정
     const SUPABASE_URL = 'https://oiazhplvilthpanwceob.supabase.co'; 
     const SUPABASE_KEY = 'sb_publishable_A2z6rbSMv_O4GoMATLrfgQ_Ve86LL0G';
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -391,7 +392,19 @@
         const rParamsFallback = extractAddressParams(roadAddr);
         let combinedItems = [];
         if (rParamsFallback.searchKeyword) {
-            combinedItems = await requestPublicElevatorList(apiSido, rParamsFallback.searchKeyword + (rParamsFallback.address2 ? " " + rParamsFallback.address2 : ""), signal, 'address');
+            // 💡 Fallback 통신 방식 수정
+            let url = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500`;
+            if (apiSido && apiSido !== "전국") url += `&sido=${encodeURIComponent(apiSido)}`;
+            url += `&address1=${encodeURIComponent(rParamsFallback.searchKeyword + (rParamsFallback.address2 ? " " + rParamsFallback.address2 : ""))}&_type=json`;
+            
+            try {
+                let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(url), { signal });
+                if(res.ok) {
+                    let data = await res.json();
+                    let items = data.response?.body?.items?.item || [];
+                    combinedItems = Array.isArray(items) ? items : [items];
+                }
+            } catch(e) {}
         }
         return filterValidElevators(combinedItems, null, rParamsFallback.searchKeyword, rParamsFallback.address2, null, null, apiSido);
     }
@@ -400,11 +413,11 @@
         let baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500`;
         if (apiSido && apiSido !== "전국") baseUrl += `&sido=${encodeURIComponent(apiSido)}`;
         
-        // 💡 [핵심] 건물명/상호 검색 시엔 buld_nm, 도로명일 때만 address1 사용
-        if (searchType === 'building' || searchType === 'place') {
+        if (searchType === 'building') {
             baseUrl += `&buld_nm=${encodeURIComponent(queryText)}`;
         } else {
-            baseUrl += `&address1=${encodeURIComponent(queryText)}`;
+            const params = extractAddressParams(queryText);
+            baseUrl += `&address1=${encodeURIComponent(params.searchKeyword)}`;
         }
         baseUrl += `&_type=json`;
 
@@ -413,9 +426,31 @@
             let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
             if (res.ok) {
                 let data = await res.json();
+                let totalCount = data.response?.body?.totalCount || 0;
                 let items = data.response?.body?.items?.item || [];
                 if (!Array.isArray(items)) items = [items];
                 list.push(...items);
+
+                let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
+                if (maxPages > 1) {
+                    for (let p = 2; p <= maxPages; p++) {
+                        await new Promise(resolve => setTimeout(resolve, 250)); 
+                        try {
+                            let pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
+                            if (pageRes.status === 429) {
+                                await new Promise(r => setTimeout(r, 1000));
+                                pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
+                                if (pageRes.status === 429) break;
+                            }
+                            if (pageRes.ok) {
+                                let pageData = await pageRes.json();
+                                let itms = pageData.response?.body?.items?.item || [];
+                                if (!Array.isArray(itms)) itms = [itms];
+                                list.push(...itms);
+                            }
+                        } catch (err) { if (err.name !== 'AbortError') console.warn(err); }
+                    }
+                }
             }
         } catch (e) { if (e.name !== 'AbortError') console.error("공공데이터 호출 실패", e); }
         return list;
@@ -581,7 +616,7 @@
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("서버 통신 에러"); } }
     }
 
-   async function executeBroadSearch() {
+    async function executeBroadSearch() {
         const query = document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
         const searchType = document.getElementById('searchType').value; 
@@ -594,34 +629,59 @@
         const queryNoSpace = query.replace(/\s+/g, '').toLowerCase(); 
 
         try {
+            let dbItems = [];
             let validItems = [];
             
-            // 💡 Supabase에서 먼저 찾고, 없으면 공공데이터를 찌름
             try {
-                let dbData = [];
-                if (searchType === 'building' || searchType === 'place') {
-                    const { data } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
-                    dbData = data || [];
+                if (searchType === 'building') {
+                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
+                    if (error) console.warn("Supabase 에러 방어:", error);
+                    if (data) dbItems = data;
                 } else {
-                    const { data } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', `%${query}%`).limit(500);
-                    dbData = data || [];
+                    const rParams = extractAddressParams(query);
+                    let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : `%${query}%`;
+                    if (rParams.searchKeyword && rParams.address2) {
+                        let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
+                        rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
+                    }
+                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(500);
+                    if (error) console.warn("Supabase 에러 방어:", error);
+                    if (data) dbItems = data;
                 }
-                validItems = dbData;
-            } catch (supaErr) { console.warn("Supabase 예외:", supaErr); }
-
-            // 💡 [핵심] 수파베이스에 없으면 공공데이터 API를 검색 타입에 맞게 정확히 호출
-            if (validItems.length === 0) {
-                showLoadingMsg("⏳ 공공데이터 백업 서버 연결 중...");
-                validItems = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
+            } catch (supaErr) {
+                console.warn("Supabase 통신 예외:", supaErr);
             }
 
-            // 필터링
+            if (dbItems.length > 0) {
+                validItems = dbItems.filter(item => {
+                    if (searchType === 'building') {
+                        return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                    } else {
+                        const params = extractAddressParams(query);
+                        return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
+                    }
+                });
+            }
+
+            if (validItems.length === 0) {
+                showLoadingMsg("⏳ 공공데이터 백업 서버 연결 중...");
+                let items = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
+                
+                validItems = items.filter(item => {
+                    if (searchType === 'building') {
+                        return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                    } else {
+                        const params = extractAddressParams(query);
+                        return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
+                    }
+                });
+            }
+
             let filteredItems = validItems.filter(apiItem => {
                 const type = String(apiItem.elvtrKindNm || apiItem.elvtr_kind_nm || apiItem.elvtrDivNm || "");
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
             });
 
-            // 승강기 고유번호 중복 제거
             const uniqueMap = new Map();
             filteredItems.forEach(item => { const elvNo = item.elevatorNo || item.elevator_no; if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item); });
             filteredItems = Array.from(uniqueMap.values());
@@ -630,6 +690,7 @@
 
             lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
             buildGlobalGroups();
+
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
     }
 
@@ -835,9 +896,7 @@
         const listContainer = document.getElementById('elevatorListContainer');
         document.getElementById('bottomSheet').classList.add('active');
         
-        // 💡 [과제 9 복구] 화면 중앙 정렬 및 바텀시트 가림 방지
-        map.panTo(new kakao.maps.LatLng(groupData.lat, groupData.lng));
-        setTimeout(() => map.panBy(0, 150), 300);
+        map.panTo(new kakao.maps.LatLng(groupData.lat - 0.001, groupData.lng));
 
         if (groupData.noElevator) {
             document.getElementById('resTotalCount').innerText = `(0대)`;
@@ -858,17 +917,15 @@
             }
         }
 
-        // 💡 잃어버렸던 HTML 표 생성 로직 완벽 복구!
         let listHtml = '';
         groupData.elevators.forEach((elv, index) => {
             const initialText = elv.scanned ? elv.state : "조회중...⏳";
             const badgeBg = elv.scanned ? (elv.isOperating ? "#1e4e79" : "#d32f2f") : "#94a3b8";
-            let displayStateText = initialText;
 
             const tableHtml = `
                 <div class="elv-item-title">
                     <span>#${index + 1} 호기 <span style="font-weight:normal; color:#777; font-size:11px; margin-left:4px;">(${elv.elevatorNo})</span></span>
-                    <span id="status-${elv.elevatorNo}" class="status-badge" style="background:${badgeBg};">${displayStateText}</span>
+                    <span id="status-${elv.elevatorNo}" class="status-badge" style="background:${badgeBg};">${initialText}</span>
                 </div>
                 <table class="data-table">
                     <tr><th>승강기종류</th><td style="font-weight:bold;">${elv.type}</td><th>운행구간</th><td id="shuttle-${elv.elevatorNo}">${elv.shuttleSection}</td></tr>
@@ -884,7 +941,6 @@
 
         listContainer.innerHTML = listHtml;
 
-        // 💡 실시간 상태 및 운행구간 원본 텍스트 적용 통신
         groupData.elevators.forEach(async (elv, index) => {
             if (elv.scanned) return; 
             
@@ -892,8 +948,12 @@
             
             try {
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
                 
+                // 💡 [해결 핵심] 전체 URL을 encodeURIComponent 하지 않고 파라미터만 인코딩합니다!
+                const params = `serviceKey=${API_CONFIG.SERVICE_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
+                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + '?' + params;
+                
+                // Cloudflare Worker 주소 뒤에 원본 URL을 인코딩해서 붙입니다.
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
                 const data = await res.json();
                 
@@ -902,7 +962,6 @@
 
                 if (data.response?.body?.items?.item) {
                     let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
-                    // 공공데이터 원본 값 그대로 사용
                     displayStateText = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || "상태불명";
                     if(item.shuttleSection || item.shuttle_section) {
                         shuttleSec = item.shuttleSection || item.shuttle_section;
@@ -916,11 +975,14 @@
                 elv.state = displayStateText;
                 elv.shuttleSection = shuttleSec;
 
+                let speedVal = parseFloat(elv.speed);
+                if (!isNaN(speedVal) && String(elv.speed).includes("m/min")) { elv.speed = (speedVal / 60).toFixed(1) + " m/s"; }
+
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
                 if (statusEl) {
                     const badgeBg = isOperating ? "#1e4e79" : "#d32f2f";
                     statusEl.style.background = badgeBg; 
-                    statusEl.innerText = displayStateText; // 💡 임의 변환 없이 원본 그대로 노출
+                    statusEl.innerText = displayStateText; 
                 }
 
                 const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
