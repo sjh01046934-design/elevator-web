@@ -605,18 +605,15 @@
             const sido = document.getElementById('sidoSelector').value; 
             const apiSido = FULL_SIDO_MAP[sido] || sido;
             
-            // 💡 [디버그 로그 2] 매칭 시도할 주소 확인
-            console.log(`\n--- 🔍 [${placeName}] Supabase 매칭 시도 ---`);
-            console.log(`1. 카카오 도로명 주소: "${roadAddress}"`);
-            console.log(`2. 카카오 지번 주소: "${jibunAddress}"`);
+            // 🚨 [로그 1] 카카오에서 넘어온 원본 주소 확인
+            console.log(`\n==============================================`);
+            console.log(`🔍 [${placeName}] 주소 정밀 매칭 디버그 모드 🔍`);
+            console.log(`==============================================`);
+            console.log(`[Target 1] 카카오 도로명: "${roadAddress}"`);
+            console.log(`[Target 2] 카카오 지번: "${jibunAddress}"`);
 
-            // 기존 주소 자르는 함수 테스트
-            const rParams = extractAddressParams(roadAddress);
-            console.log(`3. extractAddressParams()가 잘라낸 도로명 키워드: "${rParams.searchKeyword}"`);
-            console.log(`4. extractAddressParams()가 잘라낸 번지수: "${rParams.address2}"`);
-
-            // DB 통신 함수 호출 (이 안에서도 로그를 찍도록 수정)
-            let validItems = await fetchElevatorDataByAddressOrBuilding_DEBUG(apiSido, roadAddress, jibunAddress, placeName, currentAbortController.signal);
+            // DB 통신 함수 호출 (내부 로그 확인)
+            let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, roadAddress, jibunAddress, placeName, currentAbortController.signal);
 
             const uniqueMap = new Map();
             validItems.forEach(item => {
@@ -635,13 +632,14 @@
 
             if (filteredItems.length === 0) { 
                 hideLoadingMsg(); 
-                console.log(`❌ [매칭 실패] ${placeName}의 승강기 정보를 찾을 수 없습니다.`);
+                console.warn(`❌ [최종 결과] "${placeName}" 매칭 실패 (0건)`);
                 alert("승객용 승강기가 미설치된 건물입니다."); 
                 return; 
             }
 
-            console.log(`✅ [매칭 성공] 찾은 승강기 개수: ${filteredItems.length}대`);
-            
+            console.log(`✅ [최종 결과] "${placeName}" 매칭 성공 (${filteredItems.length}대)`);
+            console.log(`==============================================\n`);
+
             lastQuery = placeName; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
             buildGlobalGroups();
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("서버 통신 에러"); } }
@@ -859,26 +857,48 @@
     }
 // 💡 [복구] 지워졌던 DB 및 공공데이터 통신 함수 다시 채워넣기
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
-        showLoadingMsg(`⏳ 자산 DB에서 정밀 매핑 정보 조회 중...`);
+        showLoadingMsg(`⏳ Supabase 자산 DB에서 정밀 매핑 정보 조회 중...`);
         try {
+            // 🚨 [로그 2] 주소 자르기 결과 확인
             const rParams = extractAddressParams(roadAddr);
+            console.log(`[Parse] extractAddressParams 결과:`, rParams);
+
+            // 기존의 헐거운 검색 패턴 (예: %성내로%32%)
             let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : "";
             if (rParams.searchKeyword && rParams.address2) {
                 let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
                 rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
             }
 
+            console.log(`[Query] Supabase ilike 패턴: "${rSearchPattern}"`);
+
             if (rSearchPattern) {
                 const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(200); 
-                if (error) console.warn("Supabase 에러:", error);
+                
+                if (error) console.error("[Query Error] Supabase 에러:", error);
+                
                 if (data && data.length > 0) {
+                    console.log(`[DB Result] DB 매칭 건수: ${data.length}건 (원본)`);
+                    
+                    // 첫 3건의 DB 주소값만 샘플로 출력해서 카카오 주소와 비교
+                    console.log(`[DB Sample] 매칭된 DB 주소 샘플:`);
+                    data.slice(0, 3).forEach((d, idx) => {
+                        console.log(`  - Sample ${idx + 1}: "${d.building_address}"`);
+                    });
+
+                    // 🚨 [로그 3] 필터링 검문소 통과 결과 확인
                     let validDbItems = filterValidElevators(data, null, rParams.searchKeyword, rParams.address2, null, null, apiSido);
+                    console.log(`[Filter] filterValidElevators 통과 건수: ${validDbItems.length}건`);
+                    
                     if (validDbItems.length > 0) return validDbItems;
+                } else {
+                    console.warn(`[DB Result] DB에서 매칭된 데이터 없음 (0건)`);
                 }
             }
-        } catch (e) { console.warn("Supabase 예외:", e.message); }
+        } catch (e) { console.error("Supabase 예외:", e.message); }
 
-        // DB에 없으면 공공데이터 API 백업 호출
+        console.log(`⚠️ DB 검색 실패. 공공데이터 API(Fallback)로 우회합니다.`);
+        
         const rParamsFallback = extractAddressParams(roadAddr);
         let combinedItems = [];
         if (rParamsFallback.searchKeyword) {
