@@ -853,7 +853,46 @@
             setTimeout(() => { map.setBounds(bounds); }, 100);
         } 
     }
+// 💡 [복구] 지워졌던 DB 및 공공데이터 통신 함수 다시 채워넣기
+    async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
+        showLoadingMsg(`⏳ 자산 DB에서 정밀 매핑 정보 조회 중...`);
+        try {
+            const rParams = extractAddressParams(roadAddr);
+            let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : "";
+            if (rParams.searchKeyword && rParams.address2) {
+                let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
+                rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
+            }
 
+            if (rSearchPattern) {
+                const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(200); 
+                if (error) console.warn("Supabase 에러:", error);
+                if (data && data.length > 0) {
+                    let validDbItems = filterValidElevators(data, null, rParams.searchKeyword, rParams.address2, null, null, apiSido);
+                    if (validDbItems.length > 0) return validDbItems;
+                }
+            }
+        } catch (e) { console.warn("Supabase 예외:", e.message); }
+
+        // DB에 없으면 공공데이터 API 백업 호출
+        const rParamsFallback = extractAddressParams(roadAddr);
+        let combinedItems = [];
+        if (rParamsFallback.searchKeyword) {
+            let url = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500`;
+            if (apiSido && apiSido !== "전국") url += `&sido=${encodeURIComponent(apiSido)}`;
+            url += `&address1=${encodeURIComponent(rParamsFallback.searchKeyword + (rParamsFallback.address2 ? " " + rParamsFallback.address2 : ""))}&_type=json`;
+            
+            try {
+                let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(url), { signal });
+                if(res.ok) {
+                    let data = await res.json();
+                    let items = data.response?.body?.items?.item || [];
+                    combinedItems = Array.isArray(items) ? items : [items];
+                }
+            } catch(e) {}
+        }
+        return filterValidElevators(combinedItems, null, rParamsFallback.searchKeyword, rParamsFallback.address2, null, null, apiSido);
+    }
    // 1. 💡 [복구] 빈 껍데기 마커를 클릭했을 때 DB에서 데이터를 채워오는 함수
     async function hydrateDummyGroup(group, signal) {
         const sido = document.getElementById('sidoSelector').value; 
