@@ -373,41 +373,35 @@
         });
     }
 
-    async function fetchElevatorDataByAddressOrBuilding_DEBUG(apiSido, roadAddr, jibunAddr, placeName, signal) {
+    async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
         showLoadingMsg(`⏳ Supabase 자산 DB에서 정밀 매핑 정보 조회 중...`);
         try {
             const rParams = extractAddressParams(roadAddr);
-            let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : "";
+            let rSearchPattern = "";
             
             if (rParams.searchKeyword && rParams.address2) {
                 let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
-                rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
+                // 🚨 핵심 적용: 상호명 검색 시에도 시/군/구(예: 성북구)를 포함해 DB 검색
+                rSearchPattern = rParams.sigungu ? 
+                    `%${rParams.sigungu}%${rParams.searchKeyword}%${mainNum}%` : 
+                    `%${rParams.searchKeyword}%${mainNum}%`;
+            } else if (rParams.searchKeyword) {
+                rSearchPattern = `%${rParams.searchKeyword}%`;
             }
-
-            console.log(`5. Supabase 'ilike' 검색 패턴: "${rSearchPattern}"`);
 
             if (rSearchPattern) {
                 const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(200); 
-                
                 if (error) console.warn("Supabase 에러:", error);
                 
                 if (data && data.length > 0) {
-                    console.log(`6. DB에서 패턴 매칭된 원본 데이터(${data.length}건):`, data);
-                    
-                    // 필터 통과 테스트
+                    // 강력해진 검문소 통과
                     let validDbItems = filterValidElevators(data, null, rParams.searchKeyword, rParams.address2, null, null, apiSido);
-                    console.log(`7. 최종 필터 통과 데이터(${validDbItems.length}건):`, validDbItems);
-                    
                     if (validDbItems.length > 0) return validDbItems;
-                } else {
-                    console.log(`6. DB에서 매칭된 데이터 없음 (0건)`);
                 }
             }
         } catch (e) { console.warn("Supabase 예외:", e.message); }
 
-        console.log(`⚠️ DB 검색 실패. 공공데이터 API(Fallback)로 우회합니다.`);
-        
-        // ... 이하 기존 Fallback 로직 동일 ...
+        // DB 검색 실패 시 공공데이터 백업 호출
         const rParamsFallback = extractAddressParams(roadAddr);
         let combinedItems = [];
         if (rParamsFallback.searchKeyword) {
