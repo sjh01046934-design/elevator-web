@@ -451,6 +451,9 @@
                         } catch (err) { if (err.name !== 'AbortError') console.warn(err); }
                     }
                 }
+                console.log("🔍 API raw 데이터:", items); 
+                
+                list.push(...items);
             }
         } catch (e) { if (e.name !== 'AbortError') console.error("공공데이터 호출 실패", e); }
         return list;
