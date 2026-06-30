@@ -900,74 +900,68 @@
         document.getElementById('bottomSheet').classList.add('active');
         
         map.panTo(new kakao.maps.LatLng(groupData.lat - 0.001, groupData.lng));
+        setTimeout(() => map.panBy(0, 150), 300);
 
         if (groupData.noElevator) {
-            document.getElementById('resTotalCount').innerText = `(0대)`;
-            listContainer.innerHTML = '<div style="text-align:center; padding: 30px 10px; color:#d32f2f; font-weight:bold;">❌ 이 매장(건물)에는 승객용 승강기가 없습니다.</div>';
+            listContainer.innerHTML = '<div style="text-align:center; padding: 30px 10px; color:#d32f2f; font-weight:bold;">❌ 승객용 승강기가 없습니다.</div>';
             return;
         }
 
-        document.getElementById('resTotalCount').innerText = groupData.isDummy ? "(스캔 대기중...)" : `(${groupData.elevators.length}대)`;
+        document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
 
-        if (groupData.isDummy) {
-            listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ 승강기 자산 정보 분석 중...<br><span style="font-size:12px; font-weight:normal; color:#666;">(잠시만 기다려주세요)</span></div>';
-            await hydrateDummyGroup(groupData, new AbortController().signal);
-            renderData(); 
-            document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
-            if (groupData.noElevator || groupData.elevators.length === 0) {
-                listContainer.innerHTML = '<div style="text-align:center; padding: 30px 10px; color:#d32f2f; font-weight:bold;">❌ 이 매장(건물)에는 승객용 승강기가 없습니다.</div>';
-                return;
-            }
-        }
-
+        // 1. 초기 UI 세팅 (일단 조회 중으로 뿌림)
         let listHtml = '';
-        groupData.elevators.forEach(async (elv, index) => {
-            if (elv.scanned) return; 
-            
-            await new Promise(resolve => setTimeout(resolve, index * 100)); 
-            
+        groupData.elevators.forEach((elv, index) => {
+            listHtml += `
+                <div class="elv-item-title">
+                    <span>#${index + 1} 호기 </span>
+                    <span id="status-${elv.elevatorNo}" class="status-badge" style="background:#94a3b8;">조회중...⏳</span>
+                </div>
+                <table class="data-table">
+                    <tr><th>승강기종류</th><td style="font-weight:bold;">${elv.type}</td><th>운행구간</th><td id="shuttle-${elv.elevatorNo}">확인중...</td></tr>
+                    <tr><th>정격속도</th><td>${elv.speed}</td><th>적재하중</th><td>${elv.weight}</td></tr>
+                    <tr><th>최대정원</th><td style="font-weight:bold; color:#1e4e79; background:#f8fafc;">${elv.capacity}</td><th>설치위치</th><td style="font-size:11.5px;">${elv.installPlace}</td></tr>
+                </table>
+            `;
+        });
+        listContainer.innerHTML = listHtml;
+
+        // 2. 💡 [핵심 수정] 비동기 for...of 루프 사용 (forEach보다 훨씬 안정적)
+        for (const elv of groupData.elevators) {
             try {
-                const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + 
-                                   `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
-                
-                const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
+                const safeNo = String(elv.elevatorNo).trim().padStart(7, '0');
+                // API 호출
+                const url = `${API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM')}?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeNo}&_type=json`;
+                const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(url));
                 const data = await res.json();
                 
-                let displayStateText = "확인불가";
-                let shuttleSec = elv.shuttleSection || "구간없음"; 
+                // 대리님이 보내주신 데이터 구조 (response.body.item) 확실히 파싱
+                const item = data.response?.body?.item;
 
-                // 🚨 [핵심 수정] items.item -> item 으로 접근 경로 변경!
-                if (data.response?.body?.item) {
-                    const item = data.response.body.item; // 여기서 바로 item에 접근합니다
-                    
-                    displayStateText = item.elvtrStts || "상태불명";
-                    shuttleSec = item.shuttleSection || "구간없음";
+                if (item) {
+                    const status = item.elvtrStts || "상태불명";
+                    const shuttle = item.shuttleSection || "구간없음";
+                    const isOp = !(status.includes('정지') || status.includes('중지') || status.includes('불합격') || status.includes('고장'));
+
+                    // DOM 업데이트
+                    const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
+                    if (statusEl) {
+                        statusEl.innerText = status;
+                        statusEl.style.background = isOp ? "#1e4e79" : "#d32f2f";
+                    }
+                    const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
+                    if (shuttleEl) shuttleEl.innerText = shuttle;
+                } else {
+                    const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
+                    if (statusEl) statusEl.innerText = "정보없음";
                 }
-
-                // 운행 상태 구분 (정지/중지/불합격이면 빨간색)
-                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
-                
-                elv.scanned = true;
-                elv.state = displayStateText;
-                elv.shuttleSection = shuttleSec;
-
-                // UI 업데이트
-                const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-                if (statusEl) {
-                    statusEl.style.background = isOperating ? "#1e4e79" : "#d32f2f";
-                    statusEl.innerText = displayStateText;
-                }
-
-                const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
-                if (shuttleEl) shuttleEl.innerText = shuttleSec;
-
             } catch(e) {
-                console.error("통신 실패:", e);
+                console.error("통신오류:", e);
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-                if (statusEl) { statusEl.style.background = "#d32f2f"; statusEl.innerText = "통신오류"; }
+                if (statusEl) statusEl.innerText = "통신오류";
             }
-        });
+        }
+    });
     }
 
     function closeBottomSheet() { document.getElementById('bottomSheet').classList.remove('active'); }
