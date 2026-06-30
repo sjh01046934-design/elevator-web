@@ -459,33 +459,55 @@
         return list;
     }
 
-    function searchKakaoPlaces() {
-        const query = document.getElementById('searchInput').value.trim();
-        const sido = document.getElementById('sidoSelector').value; 
-        closeDropdown(); closeBottomSheet();
-        if (query === '') { alert("상호명을 입력해주세요."); return; }
-        saveRecentSearch(sido, query);
-        showLoadingMsg(`⏳ [${query}] 관내 지점 검색 중...`);
-
-        const kakaoQuery = (sido === "전국" || sido === "") ? query : `${sido} ${query}`;
-        let allPlaces = []; 
-        places.keywordSearch(kakaoQuery, function(result, status, pagination) {
-            if (status === kakao.maps.services.Status.OK) {
-                const validPrefixes = SIDO_PREFIX_MAP[sido] || [sido];
-                const filteredResult = result.filter(p => sido === "전국" || validPrefixes.some(prefix => (p.road_address_name || p.address_name).includes(prefix)));
-                if(filteredResult.length > 0) allPlaces.push(...filteredResult);
-                
-                if (pagination.hasNextPage) pagination.nextPage();
-                else { 
-                    hideLoadingMsg(); 
-                    if(allPlaces.length === 0) alert(`[${sido}] 지역에 "${query}" 상호가 검색되지 않습니다.`);
-                    else renderPlaceList(allPlaces, query); 
-                }
-            } else if (status === kakao.maps.services.Status.ZERO_RESULT) {
-                hideLoadingMsg(); alert(`[${sido}] 지역에 "${query}" 상호가 검색되지 않습니다.`);
-            } else { hideLoadingMsg(); alert("통신 오류가 발생했습니다."); }
-        }, { size: 15 });
+    async function getAddressFromPlaceName(placeName) {
+    // 💡 카카오 API 키를 반드시 입력하세요!
+    const REST_API_KEY = '59f58919246c9ac3780496fc7e2c0d74'; 
+    const response = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(placeName)}`, {
+        headers: { 'Authorization': `KakaoAK ${REST_API_KEY}` }
+    });
+    const result = await response.json();
+    
+    if (result.documents && result.documents.length > 0) {
+        return result.documents[0].road_address_name || result.documents[0].address_name;
     }
+    return null;
+}
+
+/**
+ * 2. 통합 검색 함수 (searchKakaoPlaces 대체)
+ */
+async function searchKakaoPlaces() {
+    const query = document.getElementById('searchInput').value.trim();
+    if (query === '') { alert("상호명을 입력해주세요."); return; }
+    
+    showLoadingMsg(`🔍 ${query} 위치 파악 중...`);
+
+    // 1단계: 상호명을 주소로 변환
+    const addr = await getAddressFromPlaceName(query);
+    if (!addr) {
+        hideLoadingMsg();
+        alert("해당 상호명의 주소를 찾을 수 없습니다.");
+        return;
+    }
+
+    // 2단계: 주소로 Supabase 검색
+    showLoadingMsg(`🏢 주소(${addr})로 승강기 정보 조회 중...`);
+    const sido = document.getElementById('sidoSelector').value;
+    const apiSido = FULL_SIDO_MAP[sido] || sido;
+    
+    // 기존에 있던 주소 기반 검색 로직 재활용
+    const elevatorData = await fetchElevatorDataByAddressOrBuilding(apiSido, addr, addr, query, new AbortController().signal);
+
+    // 3단계: 결과 처리
+    if (elevatorData && elevatorData.length > 0) {
+        hideLoadingMsg();
+        allElevatorsData = elevatorData;
+        buildGlobalGroups();
+    } else {
+        // DB에 없으면 기존 broadSearch(공공데이터 API 검색)로 대체
+        executeBroadSearch(); 
+    }
+}
 
     function renderPlaceList(placesResult, keyword) {
         const dropdown = document.getElementById('searchDropdown');
