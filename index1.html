@@ -400,11 +400,11 @@
         let baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500`;
         if (apiSido && apiSido !== "전국") baseUrl += `&sido=${encodeURIComponent(apiSido)}`;
         
-        if (searchType === 'building') {
+        // 💡 [핵심] 건물명/상호 검색 시엔 buld_nm, 도로명일 때만 address1 사용
+        if (searchType === 'building' || searchType === 'place') {
             baseUrl += `&buld_nm=${encodeURIComponent(queryText)}`;
         } else {
-            const params = extractAddressParams(queryText);
-            baseUrl += `&address1=${encodeURIComponent(params.searchKeyword)}`;
+            baseUrl += `&address1=${encodeURIComponent(queryText)}`;
         }
         baseUrl += `&_type=json`;
 
@@ -413,31 +413,9 @@
             let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=1`), { signal });
             if (res.ok) {
                 let data = await res.json();
-                let totalCount = data.response?.body?.totalCount || 0;
                 let items = data.response?.body?.items?.item || [];
                 if (!Array.isArray(items)) items = [items];
                 list.push(...items);
-
-                let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
-                if (maxPages > 1) {
-                    for (let p = 2; p <= maxPages; p++) {
-                        await new Promise(resolve => setTimeout(resolve, 250)); 
-                        try {
-                            let pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
-                            if (pageRes.status === 429) {
-                                await new Promise(r => setTimeout(r, 1000));
-                                pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
-                                if (pageRes.status === 429) break;
-                            }
-                            if (pageRes.ok) {
-                                let pageData = await pageRes.json();
-                                let itms = pageData.response?.body?.items?.item || [];
-                                if (!Array.isArray(itms)) itms = [itms];
-                                list.push(...itms);
-                            }
-                        } catch (err) { if (err.name !== 'AbortError') console.warn(err); }
-                    }
-                }
             }
         } catch (e) { if (e.name !== 'AbortError') console.error("공공데이터 호출 실패", e); }
         return list;
@@ -603,7 +581,7 @@
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("서버 통신 에러"); } }
     }
 
-    async function executeBroadSearch() {
+   async function executeBroadSearch() {
         const query = document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
         const searchType = document.getElementById('searchType').value; 
@@ -616,60 +594,34 @@
         const queryNoSpace = query.replace(/\s+/g, '').toLowerCase(); 
 
         try {
-            let dbItems = [];
             let validItems = [];
             
-            // 💡 Supabase 500 에러 이중 방어막 추가 (에러 시 안전하게 공공데이터로 백업)
+            // 💡 Supabase에서 먼저 찾고, 없으면 공공데이터를 찌름
             try {
-                if (searchType === 'building') {
-                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
-                    if (error) console.warn("Supabase 에러 방어:", error);
-                    if (data) dbItems = data;
+                let dbData = [];
+                if (searchType === 'building' || searchType === 'place') {
+                    const { data } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
+                    dbData = data || [];
                 } else {
-                    const rParams = extractAddressParams(query);
-                    let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : `%${query}%`;
-                    if (rParams.searchKeyword && rParams.address2) {
-                        let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
-                        rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
-                    }
-                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(500);
-                    if (error) console.warn("Supabase 에러 방어:", error);
-                    if (data) dbItems = data;
+                    const { data } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', `%${query}%`).limit(500);
+                    dbData = data || [];
                 }
-            } catch (supaErr) {
-                console.warn("Supabase 통신 예외:", supaErr);
-            }
+                validItems = dbData;
+            } catch (supaErr) { console.warn("Supabase 예외:", supaErr); }
 
-            if (dbItems.length > 0) {
-                validItems = dbItems.filter(item => {
-                    if (searchType === 'building') {
-                        return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
-                    } else {
-                        const params = extractAddressParams(query);
-                        return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
-                    }
-                });
-            }
-
+            // 💡 [핵심] 수파베이스에 없으면 공공데이터 API를 검색 타입에 맞게 정확히 호출
             if (validItems.length === 0) {
                 showLoadingMsg("⏳ 공공데이터 백업 서버 연결 중...");
-                let items = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
-                
-                validItems = items.filter(item => {
-                    if (searchType === 'building') {
-                        return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
-                    } else {
-                        const params = extractAddressParams(query);
-                        return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
-                    }
-                });
+                validItems = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
             }
 
+            // 필터링
             let filteredItems = validItems.filter(apiItem => {
                 const type = String(apiItem.elvtrKindNm || apiItem.elvtr_kind_nm || apiItem.elvtrDivNm || "");
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
             });
 
+            // 승강기 고유번호 중복 제거
             const uniqueMap = new Map();
             filteredItems.forEach(item => { const elvNo = item.elevatorNo || item.elevator_no; if (elvNo && !uniqueMap.has(elvNo)) uniqueMap.set(elvNo, item); });
             filteredItems = Array.from(uniqueMap.values());
@@ -678,7 +630,6 @@
 
             lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
             buildGlobalGroups();
-
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
     }
 
