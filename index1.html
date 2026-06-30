@@ -909,45 +909,26 @@
         }
 
         let listHtml = '';
-        groupData.elevators.forEach((elv, index) => {
-            const initialText = elv.scanned ? elv.state : "조회중...⏳";
-            const badgeBg = elv.scanned ? (elv.isOperating ? "#1e4e79" : "#d32f2f") : "#94a3b8";
-            let displayStateText = initialText;
-
-            const tableHtml = `
-                <div class="elv-item-title">
-                    <span>#${index + 1} 호기 <span style="font-weight:normal; color:#777; font-size:11px; margin-left:4px;">(${elv.elevatorNo})</span></span>
-                    <span id="status-${elv.elevatorNo}" class="status-badge" style="background:${badgeBg};">${displayStateText}</span>
-                </div>
-                <table class="data-table">
-                    <tr><th>승강기종류</th><td style="font-weight:bold;">${elv.type}</td><th>운행구간</th><td id="shuttle-${elv.elevatorNo}">${elv.shuttleSection}</td></tr>
-                    <tr><th>정격속도</th><td>${elv.speed}</td><th>적재하중</th><td>${elv.weight}</td></tr>
-                    <tr>
-                        <th>최대정원</th><td style="font-weight:bold; color:#1e4e79; background:#f8fafc;">${elv.capacity}</td>
-                        <th>설치위치</th><td style="font-size:11.5px; text-align:center; letter-spacing:-0.5px;">${elv.installPlace}</td>
-                    </tr>
-                </table>
-            `;
-            listHtml += tableHtml;
-        });
-
-        listContainer.innerHTML = listHtml;
-
-        // 💡 [과제 2, 3, 8] 공공데이터 상세조회 원본 데이터 100% 매핑 보장
-        groupData.elevators.forEach(async (elv, index) => {
+       groupData.elevators.forEach(async (elv, index) => {
             if (elv.scanned) return; 
             
-            await new Promise(resolve => setTimeout(resolve, index * 200)); 
+            await new Promise(resolve => setTimeout(resolve, index * 100)); 
             
             try {
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+                
+                // 🚨 [치명적 버그 수정] elevator_no (X) -> elevatorNo (O) 로 원상복구!
+                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + 
+                                   `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
+                
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
                 const data = await res.json();
                 
+                // 기본값 세팅
                 let displayStateText = "확인불가";
                 let shuttleSec = elv.shuttleSection; 
 
+                // 공공데이터 응답이 정상일 때만 원본 텍스트로 덮어씌움
                 if (data.response?.body?.items?.item) {
                     let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
                     displayStateText = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || "상태불명";
@@ -956,6 +937,7 @@
                     }
                 }
 
+                // 운행 상태 구분 (색상 결정용)
                 const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
                 
                 elv.scanned = true;
@@ -963,11 +945,12 @@
                 elv.state = displayStateText;
                 elv.shuttleSection = shuttleSec;
 
+                // UI 업데이트 (가공 없이 원본 텍스트 그대로 적용)
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
                 if (statusEl) {
                     const badgeBg = isOperating ? "#1e4e79" : "#d32f2f";
                     statusEl.style.background = badgeBg; 
-                    statusEl.innerText = displayStateText; 
+                    statusEl.innerText = displayStateText; // 💡 여기서 '정상운행' 임의 변환 없이 API 원본값을 씁니다
                 }
 
                 const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
@@ -975,7 +958,10 @@
 
             } catch(e) {
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-                if (statusEl) { statusEl.style.background = "#d32f2f"; statusEl.innerText = "통신오류"; }
+                if (statusEl) { 
+                    statusEl.style.background = "#d32f2f"; 
+                    statusEl.innerText = "통신오류"; 
+                }
             }
         });
     }
