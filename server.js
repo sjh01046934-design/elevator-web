@@ -96,27 +96,24 @@ app.get('/api/realtime-status', async (req, res) => {
     if (cachedStatus) return res.json({ status: cachedStatus }); 
 
     try {
-        // 💡 [수정 2] elevator_no -> elevatorNo 로 공공데이터 명세 완벽 복구
-        const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
+        // 🚨 [필수 수정] elevatorNo -> elevator_no로 변경
+        const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
         const response = await axios.get(apiUrl, { timeout: 5000 });
 
-        if (typeof response.data === 'string' && response.data.includes('<errMsg>')) {
-            return res.json({ status: "API키오류" }); 
+        // 💡 [디버깅] 실제 응답 내용을 로그로 찍어보세요 (백엔드 터미널 확인)
+        // console.log("공공데이터 응답:", response.data);
+
+        if (response.data?.response?.body?.items?.item) {
+            const item = Array.isArray(response.data.response.body.items.item) ? response.data.response.body.items.item[0] : response.data.response.body.items.item;
+            // 🚨 [필수 수정] elvtrSttsNm -> elvtrStts로 변경
+            const status = item.elvtrStts || "상태알수없음";
+            statusCache.set(safeElevatorNo, status);
+            return res.json({ status: status });
         }
-
-        const items = response.data?.response?.body?.items?.item || response.data?.response?.body?.item;
-        let currentStatus = "상태알수없음";
-
-        if (items) {
-             const itemData = Array.isArray(items) ? items[0] : items;
-             // 공공데이터 명세 규격 바인딩 표준화
-             currentStatus = itemData.elvtrSttsNm || itemData.elvtrStts || "상태알수없음"; 
-        }
-
-        statusCache.set(safeElevatorNo, currentStatus);
-        res.json({ status: currentStatus });
+        res.json({ status: "데이터없음" });
     } catch (error) {
-        res.json({ status: "확인불가" });
+        console.error("API 통신 에러:", error.message);
+        res.json({ status: "통신에러" });
     }
 });
 
