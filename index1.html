@@ -923,54 +923,54 @@
         let listHtml = '';
         groupData.elevators.forEach(async (elv, index) => {
             if (elv.scanned) return; 
-            
             await new Promise(resolve => setTimeout(resolve, index * 100)); 
             
             try {
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                
-                // 🚨 1. 대리님이 찾으신 정답: 파라미터는 무조건 'elevator_no'
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + 
-                                   `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+                const params = `serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + '?' + params;
                 
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
                 const data = await res.json();
                 
-                let displayStateText = "확인불가";
-                let shuttleSec = elv.shuttleSection; 
+                // 🚨 [필수 확인] 데이터 구조가 어떻게 오는지 확인
+                console.log(`[${elv.elevatorNo}] API 응답 원본:`, data);
 
-                if (data.response?.body?.items?.item) {
-                    let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
-                    
-                    // 🚨 2. 대리님이 찾으신 정답: 상태값 키는 'elvtrStts', 운행구간은 'shuttleSection'
-                    displayStateText = item.elvtrStts || item.elvtrSttsNm || "상태불명";
-                    
-                    if(item.shuttleSection) {
-                        shuttleSec = item.shuttleSection;
+                let displayStateText = "정보없음";
+                let shuttleSec = "정보없음";
+
+                // 구조 안전하게 확인
+                if (data.response && data.response.body) {
+                    const body = data.response.body;
+                    if (body.items && body.items.item) {
+                        const item = Array.isArray(body.items.item) ? body.items.item[0] : body.items.item;
+                        
+                        displayStateText = item.elvtrStts || "상태불명";
+                        shuttleSec = item.shuttleSection || "구간없음";
+                        
+                        console.log(`[${elv.elevatorNo}] 추출값: 상태=${displayStateText}, 구간=${shuttleSec}`);
+                    } else if (body.resultCode !== "00") {
+                        console.warn(`[${elv.elevatorNo}] API 에러:`, body.resultMsg);
+                        displayStateText = "API에러";
                     }
                 }
 
-                // 운행 상태 구분 (색상 결정용)
-                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
-                
-                elv.scanned = true;
-                elv.isOperating = isOperating; 
-                elv.state = displayStateText;
-                elv.shuttleSection = shuttleSec;
-
+                // UI 업데이트
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
                 if (statusEl) {
-                    const badgeBg = isOperating ? "#1e4e79" : "#d32f2f";
-                    statusEl.style.background = badgeBg; 
-                    statusEl.innerText = displayStateText; // 💡 공공데이터 날것(예: 운행중지(불합격)) 그대로 표시
+                    statusEl.innerText = displayStateText;
+                    statusEl.style.background = displayStateText.includes("운행") ? "#1e4e79" : "#d32f2f";
                 }
 
                 const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
-                if (shuttleEl) shuttleEl.innerText = shuttleSec; // 💡 공공데이터 날것(예: B1-2) 그대로 표시
+                if (shuttleEl) shuttleEl.innerText = shuttleSec;
+
+                elv.scanned = true;
 
             } catch(e) {
+                console.error("통신 실패:", e);
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-                if (statusEl) { statusEl.style.background = "#d32f2f"; statusEl.innerText = "통신오류"; }
+                if (statusEl) statusEl.innerText = "통신오류";
             }
         });
     }
