@@ -924,49 +924,48 @@
         groupData.elevators.forEach(async (elv, index) => {
             if (elv.scanned) return; 
             
-            await new Promise(resolve => setTimeout(resolve, index * 200)); 
+            await new Promise(resolve => setTimeout(resolve, index * 100)); 
             
             try {
-                const safeNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                const detailApiUrl = `${API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM')}?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeNo}&_type=json`;
+                const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
+                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + 
+                                   `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
                 
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
                 const data = await res.json();
                 
-                // 🚨 1. 모든 응답을 콘솔에 쏟아냅니다. (이걸 보고 데이터 구조를 확정합니다)
-                console.log(`[${safeNo}] 전체 응답 데이터:`, JSON.stringify(data, null, 2));
+                let displayStateText = "확인불가";
+                let shuttleSec = elv.shuttleSection || "구간없음"; 
 
-                let displayStateText = "정보없음";
-                let shuttleSec = "구간없음"; 
-
-                // 2. 데이터 구조를 유연하게 파싱
-                const body = data?.response?.body;
-                if (body) {
-                    if (body.items && body.items.item) {
-                        const item = Array.isArray(body.items.item) ? body.items.item[0] : body.items.item;
-                        displayStateText = item.elvtrStts || "상태불명";
-                        shuttleSec = item.shuttleSection || "구간없음";
-                    } else {
-                        // 데이터가 없거나 resultCode가 에러인 경우
-                        displayStateText = body.resultMsg || "데이터없음";
-                    }
+                // 🚨 [핵심 수정] items.item -> item 으로 접근 경로 변경!
+                if (data.response?.body?.item) {
+                    const item = data.response.body.item; // 여기서 바로 item에 접근합니다
+                    
+                    displayStateText = item.elvtrStts || "상태불명";
+                    shuttleSec = item.shuttleSection || "구간없음";
                 }
 
-                // UI 반영
+                // 운행 상태 구분 (정지/중지/불합격이면 빨간색)
+                const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
+                
+                elv.scanned = true;
+                elv.state = displayStateText;
+                elv.shuttleSection = shuttleSec;
+
+                // UI 업데이트
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
                 if (statusEl) {
+                    statusEl.style.background = isOperating ? "#1e4e79" : "#d32f2f";
                     statusEl.innerText = displayStateText;
-                    statusEl.style.background = displayStateText.includes("운행") ? "#1e4e79" : "#d32f2f";
                 }
+
                 const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
                 if (shuttleEl) shuttleEl.innerText = shuttleSec;
-
-                elv.scanned = true;
 
             } catch(e) {
                 console.error("통신 실패:", e);
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-                if (statusEl) statusEl.innerText = "통신오류";
+                if (statusEl) { statusEl.style.background = "#d32f2f"; statusEl.innerText = "통신오류"; }
             }
         });
     }
