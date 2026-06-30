@@ -11,8 +11,9 @@ app.use(cors());
 const PUBLIC_API_KEY = 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d';
 const statusCache = new NodeCache({ stdTTL: 600 });
 
+// 💡 [수정 1] Supabase DB 접속 문자열 원상복구 (비밀번호 및 호스트명 포함)
 const pool = new Pool({
-    connectionString: "postgresql://postgres.oiazhplvilthpanwceob.supabase.com:6543/postgres",
+    connectionString: "postgresql://postgres.oiazhplvilthpanwceob:p2XEnK5UMVDjmk25@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres",
     ssl: { rejectUnauthorized: false }
 });
 
@@ -95,8 +96,8 @@ app.get('/api/realtime-status', async (req, res) => {
     if (cachedStatus) return res.json({ status: cachedStatus }); 
 
     try {
-        // 💡 [파라미터 버그 수정] elevatorNo= -> elevator_no= 변경 / 타임아웃 5초로 최적화
-        const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
+        // 💡 [수정 2] elevator_no -> elevatorNo 로 공공데이터 명세 완벽 복구
+        const apiUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${PUBLIC_API_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
         const response = await axios.get(apiUrl, { timeout: 5000 });
 
         if (typeof response.data === 'string' && response.data.includes('<errMsg>')) {
