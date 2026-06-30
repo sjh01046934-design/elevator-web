@@ -313,47 +313,63 @@
     document.addEventListener('click', function(event) { if (!document.getElementById('searchBar').contains(event.target)) closeDropdown(); });
 
     function extractAddressParams(fullAddress) {
-        if (!fullAddress) return { searchKeyword: "", address2: "" };
-        let clean = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|충청남도|충청북도|전라남도|전라북도|경상남도|경상북도)(특별자치시|특별시|광역시|도|특별자치도)?\s*/, '');
+        if (!fullAddress) return { searchKeyword: "", address2: "", sigungu: "" };
+        
+        // 지역명 접두사 제거
+        let clean = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\s]*\s+/, '');
         clean = clean.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2'); 
+        
         let words = clean.trim().split(/\s+/);
         let numIdx = -1;
         for (let i = words.length - 1; i >= 0; i--) { if (/^\d/.test(words[i])) { numIdx = i; break; } }
+        
         let searchKeyword = numIdx !== -1 ? (words[numIdx - 1] || "") : (words[words.length - 1] || "");
         let address2 = numIdx !== -1 ? words[numIdx] : "";
-        return { searchKeyword: searchKeyword.trim(), address2: address2.trim() };
+        
+        // 🚨 핵심 추가: 구/군 추출 (예: '강동구 성내로 32' -> '강동구')
+        let sigungu = numIdx > 1 ? words[numIdx - 2] : ""; 
+        
+        return { 
+            searchKeyword: searchKeyword.trim(), 
+            address2: address2.trim(),
+            sigungu: sigungu.trim()
+        };
     }
 
     function filterValidElevators(items, borough, roadKeyword, roadNo, dongKeyword, jibunNo, selectedSido) {
         if (!items || items.length === 0) return [];
         
-        const rClean = roadKeyword ? roadKeyword.replace(/\s+/g, '').toLowerCase() : "";
+        const rClean = roadKeyword ? roadKeyword.trim() : "";
         const rNum = roadNo ? roadNo.trim() : ""; 
 
         return items.filter(item => {
             let originalAddr = String(item.building_address || item.address1 || item.address || "");
-            let addrStr = originalAddr.replace(/\s+/g, '').toLowerCase();
             
-            // 🚨 범인 체포: 지역명 비교 방식 개선
-            // "세종특별자치시"가 들어와도 앞 2글자("세종")만 따서 유연하게 검사합니다.
+            // 1. 시/도 지역 필터링 (세종특별자치시 유연 대응)
             if (selectedSido && selectedSido !== "전국") {
                 let shortSido = selectedSido.substring(0, 2); 
                 let matched = originalAddr.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
-                
-                if (!matched) return false; // 지역이 다르면 탈락
+                if (!matched) return false; 
             }
             
-            const matchNumber = (targetNum) => {
-                if (!targetNum) return true;
-                let regex = new RegExp(`(?:^|[^0-9])${targetNum}(?:[^0-9]|$)`);
-                return regex.test(originalAddr);
-            };
-
-            // 도로명과 번지수가 모두 일치하면 통과
-            if (rClean && addrStr.includes(rClean) && matchNumber(rNum)) {
-                return true;
+            // 2. 🚨 도로명 + 번지수 핀포인트 필터링
+            if (rClean && rNum) {
+                const safeRoad = rClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const safeNum = rNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                
+                // 정규식 해설: 도로명과 번호가 붙어있고, 그 뒤에 '길'이나 다른 숫자가 오면 쳐냄
+                // 허용: "성내로 32", "성내로 32-1", "성내로 32 (성내동)"
+                // 차단: "성내로6길 32", "성내로 32길"
+                const exactMatchRegex = new RegExp(`${safeRoad}\\s*${safeNum}(?:-[0-9]+)?(?:\\s|\\(|,|$)`);
+                
+                if (!exactMatchRegex.test(originalAddr)) {
+                    return false; // 조건에 안 맞으면 칼같이 버림
+                }
+            } else if (rClean) {
+                if (!originalAddr.replace(/\s+/g, '').includes(rClean.replace(/\s+/g, ''))) return false;
             }
-            return false;
+
+            return true;
         });
     }
 
@@ -657,33 +673,31 @@
         const apiSido = FULL_SIDO_MAP[sido] || sido;
         const queryNoSpace = query.replace(/\s+/g, '').toLowerCase(); 
 
-        // 🚨 [로그 1] 직접 검색 시작 시점 인자 확인
-        console.log(`\n==============================================`);
-        console.log(`🔍 [${searchType} 직접 검색] DB 스캔 디버그 모드 🔍`);
-        console.log(`==============================================`);
-        console.log(`[Input] 입력 키워드: "${query}" (선택 지역: ${sido})`);
-
         try {
             let dbItems = [];
             let validItems = [];
             
             try {
                 if (searchType === 'building') {
-                    console.log(`[Query] 건물명 검색 조율 (ilike '%${query}%')`);
                     const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
                     if (error) console.warn("Supabase 에러 방어:", error);
                     if (data) dbItems = data;
                 } else {
-                    // 도로명 주소 분해 파라미터 확인
                     const rParams = extractAddressParams(query);
-                    console.log(`[Parse] extractAddressParams 결과:`, rParams);
-
-                    let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : `%${query}%`;
+                    let rSearchPattern = "";
+                    
+                    // 🚨 DB 검색 시 '구/군(sigungu)'이 있으면 포함해서 검색 (속도/정확도 상승)
                     if (rParams.searchKeyword && rParams.address2) {
                         let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
-                        rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
+                        rSearchPattern = rParams.sigungu ? 
+                            `%${rParams.sigungu}%${rParams.searchKeyword}%${mainNum}%` : 
+                            `%${rParams.searchKeyword}%${mainNum}%`;
+                    } else if (rParams.searchKeyword) {
+                        rSearchPattern = `%${rParams.searchKeyword}%`;
+                    } else {
+                        rSearchPattern = `%${query}%`;
                     }
-                    console.log(`[Query] 도로명 주소 검색 패턴 (ilike '${rSearchPattern}')`);
+
                     const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(500);
                     if (error) console.warn("Supabase 에러 방어:", error);
                     if (data) dbItems = data;
@@ -691,29 +705,18 @@
             } catch (supaErr) { console.warn("Supabase 통신 예외:", supaErr); }
 
             if (dbItems.length > 0) {
-                console.log(`[DB Result] 일치하는 DB 데이터 총량: ${dbItems.length}건`);
-                
-                // 검색 오차 원인 분석을 위한 DB 주소 데이터 샘플 출력
-                console.log(`[DB Sample] 가져온 주소값 매칭 샘플(최대 5건):`);
-                dbItems.slice(0, 5).forEach((d, idx) => {
-                    console.log(`  - Sample ${idx + 1}: 건물명: "${d.buld_nm}" | 주소: "${d.building_address}"`);
-                });
-
                 validItems = dbItems.filter(item => {
                     if (searchType === 'building') {
                         return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
                     } else {
                         const params = extractAddressParams(query);
-                        // 검문소 필터링 과정 모니터링
-                        let pass = filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
-                        return pass;
+                        // 새로고친 철통 검문소 통과 여부 확인
+                        return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
                     }
                 });
-                console.log(`[Filter] 검문소(filterValidElevators) 통과 데이터 건수: ${validItems.length}건`);
             }
 
             if (validItems.length === 0) {
-                console.log(`⚠️ DB 내 매칭 데이터 부족. 공공데이터 백업 서버 연결 시도`);
                 showLoadingMsg("⏳ 공공데이터 백업 서버 연결 중...");
                 let items = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
                 
@@ -725,7 +728,6 @@
                         return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
                     }
                 });
-                console.log(`[Fallback Filter] 공공데이터 통과 건수: ${validItems.length}건`);
             }
 
             let filteredItems = validItems.filter(apiItem => {
@@ -738,8 +740,6 @@
             filteredItems = Array.from(uniqueMap.values());
 
             if (filteredItems.length === 0) { hideLoadingMsg(); alert(`검색 결과가 존재하지 않습니다.`); return; }
-            console.log(`✅ [최종 매칭 완료] 표시될 마커 데이터 개수: ${filteredItems.length}건`);
-            console.log(`==============================================\n`);
 
             lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
             buildGlobalGroups();
