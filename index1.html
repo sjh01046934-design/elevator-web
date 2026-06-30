@@ -461,7 +461,7 @@
 
     async function getAddressFromPlaceName(placeName) {
     // 💡 카카오 API 키를 반드시 입력하세요!
-    const REST_API_KEY = '59f58919246c9ac3780496fc7e2c0d74'; 
+    const REST_API_KEY = 'afc392f1a512bafb54bc0fc15f4d8875'; 
     const response = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(placeName)}`, {
         headers: { 'Authorization': `KakaoAK ${REST_API_KEY}` }
     });
