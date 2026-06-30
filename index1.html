@@ -923,45 +923,41 @@
         let listHtml = '';
         groupData.elevators.forEach(async (elv, index) => {
             if (elv.scanned) return; 
-            await new Promise(resolve => setTimeout(resolve, index * 100)); 
+            
+            await new Promise(resolve => setTimeout(resolve, index * 200)); 
             
             try {
-                const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                const params = `serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeElevatorNo}&_type=json`;
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + '?' + params;
+                const safeNo = String(elv.elevatorNo).trim().padStart(7, '0');
+                const detailApiUrl = `${API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM')}?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeNo}&_type=json`;
                 
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
                 const data = await res.json();
                 
-                // 🚨 [필수 확인] 데이터 구조가 어떻게 오는지 확인
-                console.log(`[${elv.elevatorNo}] API 응답 원본:`, data);
+                // 🚨 1. 모든 응답을 콘솔에 쏟아냅니다. (이걸 보고 데이터 구조를 확정합니다)
+                console.log(`[${safeNo}] 전체 응답 데이터:`, JSON.stringify(data, null, 2));
 
                 let displayStateText = "정보없음";
-                let shuttleSec = "정보없음";
+                let shuttleSec = "구간없음"; 
 
-                // 구조 안전하게 확인
-                if (data.response && data.response.body) {
-                    const body = data.response.body;
+                // 2. 데이터 구조를 유연하게 파싱
+                const body = data?.response?.body;
+                if (body) {
                     if (body.items && body.items.item) {
                         const item = Array.isArray(body.items.item) ? body.items.item[0] : body.items.item;
-                        
                         displayStateText = item.elvtrStts || "상태불명";
                         shuttleSec = item.shuttleSection || "구간없음";
-                        
-                        console.log(`[${elv.elevatorNo}] 추출값: 상태=${displayStateText}, 구간=${shuttleSec}`);
-                    } else if (body.resultCode !== "00") {
-                        console.warn(`[${elv.elevatorNo}] API 에러:`, body.resultMsg);
-                        displayStateText = "API에러";
+                    } else {
+                        // 데이터가 없거나 resultCode가 에러인 경우
+                        displayStateText = body.resultMsg || "데이터없음";
                     }
                 }
 
-                // UI 업데이트
+                // UI 반영
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
                 if (statusEl) {
                     statusEl.innerText = displayStateText;
                     statusEl.style.background = displayStateText.includes("운행") ? "#1e4e79" : "#d32f2f";
                 }
-
                 const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
                 if (shuttleEl) shuttleEl.innerText = shuttleSec;
 
