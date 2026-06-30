@@ -804,7 +804,7 @@
         })).then(() => { renderData(); });
     }
 
-    function renderData() {
+    function renderData(preventMove = false) {
         let renderList = [...globalGroups];
         const queryLower = lastQuery.replace(/\s+/g, '').toLowerCase();
         renderList.sort((a, b) => {
@@ -846,12 +846,16 @@
         
         clusterer.addMarkers(newOverlays);
         
-        if (renderList.length === 1) {
-            map.setLevel(5); setTimeout(() => { map.panTo(new kakao.maps.LatLng(renderList[0].lat, renderList[0].lng)); }, 100);
-        } else if (renderList.length > 1) {
-            let bounds = new kakao.maps.LatLngBounds(); newOverlays.forEach(overlay => { bounds.extend(overlay.getPosition()); });
-            setTimeout(() => { map.setBounds(bounds); }, 100);
-        } 
+        // 🚨 지도가 제멋대로 움직이던 범인 체포 🚨
+        // preventMove가 true일 때(마커 클릭 시)는 지도를 줌/이동하지 않고 그대로 둡니다!
+        if (!preventMove) {
+            if (renderList.length === 1) {
+                map.setLevel(5); setTimeout(() => { map.panTo(new kakao.maps.LatLng(renderList[0].lat, renderList[0].lng)); }, 100);
+            } else if (renderList.length > 1) {
+                let bounds = new kakao.maps.LatLngBounds(); newOverlays.forEach(overlay => { bounds.extend(overlay.getPosition()); });
+                setTimeout(() => { map.setBounds(bounds); }, 100);
+            } 
+        }
     }
 // 💡 [복구] 지워졌던 DB 및 공공데이터 통신 함수 다시 채워넣기
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
@@ -968,11 +972,15 @@
         document.getElementById('bottomSheet').classList.add('active');
         const listContainer = document.getElementById('elevatorListContainer');
 
+        // 🚨 범인 1: 강제로 지도를 위로 밀어올리던 panTo, panBy 삭제 완료!
+
         if (groupData.isDummy) {
             listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ 승강기 정보 분석 중...<br><span style="font-size:12px; color:#666;">(잠시만 기다려주세요)</span></div>';
             
             await hydrateDummyGroup(groupData, new AbortController().signal);
-            renderData(); 
+            
+            // 🚨 범인 2: 마커 글자만 갱신하고, 지도는 움직이지 마라! (true 전달)
+            renderData(true); 
             
             if (groupData.noElevator || groupData.elevators.length === 0) {
                 document.getElementById('resTotalCount').innerText = `(0대)`;
@@ -983,7 +991,6 @@
         
         document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
 
-        // 🚨 이 부분이 사라져서 상세 제원이 안 보였던 것입니다. 테이블 레이아웃 전체 복원 완료!
         listContainer.innerHTML = groupData.elevators.map((elv, i) => `
             <div class="elv-item-title">
                 <span>#${i+1} 호기 </span>
@@ -1008,7 +1015,6 @@
                 
                 if(item) {
                     const status = item.elvtrStts || "상태불명";
-                    // PRO #4: 검사연기, 운행정지 등 모두 빨간색 처리
                     const isOp = !(status.includes('정지') || status.includes('고장') || status.includes('불합격') || status.includes('휴지') || status.includes('연기') || status.includes('폐지'));
                     
                     document.getElementById(`shuttle-${eNo}`).innerText = item.shuttleSection || "구간없음";
