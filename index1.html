@@ -930,12 +930,12 @@
         for (const elv of groupData.elevators) {
             try {
                 const safeNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                // API 호출
                 const url = `${API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM')}?serviceKey=${API_CONFIG.SERVICE_KEY}&elevator_no=${safeNo}&_type=json`;
+                
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(url));
                 const data = await res.json();
                 
-                // 대리님이 보내주신 데이터 구조 (response.body.item) 확실히 파싱
+                // 🚨 파싱 경로 수정: items.item -> item
                 const item = data.response?.body?.item;
 
                 if (item) {
