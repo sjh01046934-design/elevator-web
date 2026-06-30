@@ -185,7 +185,6 @@
 
     let currentAbortController = null; 
 
-    // 수파베이스 접속 환경 설정
     const SUPABASE_URL = 'https://oiazhplvilthpanwceob.supabase.co'; 
     const SUPABASE_KEY = 'sb_publishable_A2z6rbSMv_O4GoMATLrfgQ_Ve86LL0G';
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -220,7 +219,6 @@
         "경남": ["창원시", "진주시", "통영시", "사천시", "김해시", "밀양시", "거제시", "양산시", "의령군", "함안군", "창녕군", "고성군", "남해군", "하동군", "산청군", "함양군", "거창군", "합천군"]
     };
 
-    // 💡 [과제 4, 5 해결] 카카오맵/주소 필터링용 시도 매핑 
     const SIDO_PREFIX_MAP = {
         "서울": ["서울"], "세종": ["세종"], "경기": ["경기"], "인천": ["인천"], "부산": ["부산"], "대구": ["대구"], "광주": ["광주"], "대전": ["대전"], "울산": ["울산"], "제주": ["제주"],
         "충남": ["충남", "충청남도"], "충북": ["충북", "충청북도"], "전남": ["전남", "전라남도"], "전북": ["전북", "전라북도"], "경남": ["경남", "경상남도"], "경북": ["경북", "경상북도"], "강원": ["강원"]
@@ -333,7 +331,6 @@
 
     function extractAddressParams(fullAddress) {
         if (!fullAddress) return { searchKeyword: "", address2: "" };
-        // 💡 모든 시/도 정규표현식 포함 (오류 방지)
         let clean = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|충청남도|충청북도|전라남도|전라북도|경상남도|경상북도)(특별자치시|특별시|광역시|도|특별자치도)?\s*/, '');
         clean = clean.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2'); 
         let words = clean.trim().split(/\s+/);
@@ -348,20 +345,18 @@
         if (!items || items.length === 0) return [];
         
         const rClean = roadKeyword ? roadKeyword.replace(/\s+/g, '').toLowerCase() : "";
-        const rNum = roadNo ? roadNo.trim() : ""; // 💡 [과제 7] 하이픈 유지
+        const rNum = roadNo ? roadNo.trim() : ""; 
         const validPrefixes = SIDO_PREFIX_MAP[selectedSido] || []; 
 
         return items.filter(item => {
             let originalAddr = String(item.building_address || item.address1 || item.address || "");
             let addrStr = originalAddr.replace(/\s+/g, '').toLowerCase();
             
-            // 💡 [과제 4] 천안 등 타지역 유입 원천 차단
             if (selectedSido && selectedSido !== "전국") {
                 let matched = validPrefixes.some(prefix => originalAddr.includes(prefix) || (item.sido && String(item.sido).includes(prefix)));
                 if (!matched) return false; 
             }
             
-            // 💡 [과제 7] 61-26 같은 번지수 완벽 매칭
             const matchNumber = (targetNum) => {
                 if (!targetNum) return true;
                 let regex = new RegExp(`(?:^|[^0-9])${targetNum}(?:[^0-9]|$)`);
@@ -384,13 +379,14 @@
             }
 
             if (rSearchPattern) {
-                const { data, err } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(200); 
+                const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(200); 
+                if (error) console.warn("Supabase 에러:", error);
                 if (data && data.length > 0) {
                     let validDbItems = filterValidElevators(data, null, rParams.searchKeyword, rParams.address2, null, null, apiSido);
                     if (validDbItems.length > 0) return validDbItems;
                 }
             }
-        } catch (e) { console.warn("Supabase 에러:", e.message); }
+        } catch (e) { console.warn("Supabase 예외:", e.message); }
 
         const rParamsFallback = extractAddressParams(roadAddr);
         let combinedItems = [];
@@ -400,7 +396,6 @@
         return filterValidElevators(combinedItems, null, rParamsFallback.searchKeyword, rParamsFallback.address2, null, null, apiSido);
     }
 
-    // 💡 [과제 7 해결] 공공데이터 도로명 검색 시 주소 분리 금지
     async function requestPublicElevatorList(apiSido, queryText, signal, searchType) {
         let baseUrl = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500`;
         if (apiSido && apiSido !== "전국") baseUrl += `&sido=${encodeURIComponent(apiSido)}`;
@@ -408,7 +403,6 @@
         if (searchType === 'building') {
             baseUrl += `&buld_nm=${encodeURIComponent(queryText)}`;
         } else {
-            // 도로명 전체가 아닌 핵심 키워드(황산벌로1098번길)만 공공데이터에 던짐 -> 필터가 알아서 걸러줌
             const params = extractAddressParams(queryText);
             baseUrl += `&address1=${encodeURIComponent(params.searchKeyword)}`;
         }
@@ -427,7 +421,6 @@
                 let maxPages = Math.min(Math.ceil(totalCount / 500), 10); 
                 if (maxPages > 1) {
                     for (let p = 2; p <= maxPages; p++) {
-                        // 💡 [과제 8] 429 방지
                         await new Promise(resolve => setTimeout(resolve, 250)); 
                         try {
                             let pageRes = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(baseUrl + `&pageNo=${p}`), { signal });
@@ -450,7 +443,6 @@
         return list;
     }
 
-    // 💡 [과제 5 해결] 카카오 장소 검색 시 타지역 섞임 원천 차단
     function searchKakaoPlaces() {
         const query = document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
@@ -627,18 +619,25 @@
             let dbItems = [];
             let validItems = [];
             
-            if (searchType === 'building') {
-                const { data } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
-                if (data) dbItems = data;
-            } else {
-                const rParams = extractAddressParams(query);
-                let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : `%${query}%`;
-                if (rParams.searchKeyword && rParams.address2) {
-                    let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
-                    rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
+            // 💡 Supabase 500 에러 이중 방어막 추가 (에러 시 안전하게 공공데이터로 백업)
+            try {
+                if (searchType === 'building') {
+                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
+                    if (error) console.warn("Supabase 에러 방어:", error);
+                    if (data) dbItems = data;
+                } else {
+                    const rParams = extractAddressParams(query);
+                    let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : `%${query}%`;
+                    if (rParams.searchKeyword && rParams.address2) {
+                        let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
+                        rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
+                    }
+                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(500);
+                    if (error) console.warn("Supabase 에러 방어:", error);
+                    if (data) dbItems = data;
                 }
-                const { data } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(500);
-                if (data) dbItems = data;
+            } catch (supaErr) {
+                console.warn("Supabase 통신 예외:", supaErr);
             }
 
             if (dbItems.length > 0) {
@@ -729,7 +728,7 @@
 
             const safeElevatorNo = String(apiItem.elevatorNo || apiItem.elevator_no || "").trim().padStart(7, '0') || "미상";
 
-            // 💡 [과제 6, 10] '01월03일', '1월 1일' -> '1-3' 완벽 변환 정규식
+            // 💡 [과제 6, 10 복구] 날짜 오염 데이터 (01월03일, 1월 1일) 정규화
             let cleanInstallPlace = String(apiItem.installationPlace || apiItem.installation_place || "-").trim();
             cleanInstallPlace = cleanInstallPlace.replace(/0?(\d+)\s*월\s*0?(\d+)\s*일?/g, '$1-$2');
 
@@ -885,7 +884,7 @@
         const listContainer = document.getElementById('elevatorListContainer');
         document.getElementById('bottomSheet').classList.add('active');
         
-        // 💡 [과제 9 해결] 마커 클릭 시 화면 중앙 배치 (바텀시트 높이 고려하여 애니메이션 적용)
+        // 💡 [과제 9 복구] 화면 중앙 정렬 및 바텀시트 가림 방지
         map.panTo(new kakao.maps.LatLng(groupData.lat, groupData.lng));
         setTimeout(() => map.panBy(0, 150), 300);
 
@@ -908,36 +907,57 @@
             }
         }
 
+        // 💡 잃어버렸던 HTML 표 생성 로직 완벽 복구!
         let listHtml = '';
-       groupData.elevators.forEach(async (elv, index) => {
+        groupData.elevators.forEach((elv, index) => {
+            const initialText = elv.scanned ? elv.state : "조회중...⏳";
+            const badgeBg = elv.scanned ? (elv.isOperating ? "#1e4e79" : "#d32f2f") : "#94a3b8";
+            let displayStateText = initialText;
+
+            const tableHtml = `
+                <div class="elv-item-title">
+                    <span>#${index + 1} 호기 <span style="font-weight:normal; color:#777; font-size:11px; margin-left:4px;">(${elv.elevatorNo})</span></span>
+                    <span id="status-${elv.elevatorNo}" class="status-badge" style="background:${badgeBg};">${displayStateText}</span>
+                </div>
+                <table class="data-table">
+                    <tr><th>승강기종류</th><td style="font-weight:bold;">${elv.type}</td><th>운행구간</th><td id="shuttle-${elv.elevatorNo}">${elv.shuttleSection}</td></tr>
+                    <tr><th>정격속도</th><td>${elv.speed}</td><th>적재하중</th><td>${elv.weight}</td></tr>
+                    <tr>
+                        <th>최대정원</th><td style="font-weight:bold; color:#1e4e79; background:#f8fafc;">${elv.capacity}</td>
+                        <th>설치위치</th><td style="font-size:11.5px; text-align:center; letter-spacing:-0.5px;">${elv.installPlace}</td>
+                    </tr>
+                </table>
+            `;
+            listHtml += tableHtml;
+        });
+
+        listContainer.innerHTML = listHtml;
+
+        // 💡 실시간 상태 및 운행구간 원본 텍스트 적용 통신
+        groupData.elevators.forEach(async (elv, index) => {
             if (elv.scanned) return; 
             
             await new Promise(resolve => setTimeout(resolve, index * 100)); 
             
             try {
                 const safeElevatorNo = String(elv.elevatorNo).trim().padStart(7, '0');
-                
-                // 🚨 [치명적 버그 수정] elevator_no (X) -> elevatorNo (O) 로 원상복구!
-                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + 
-                                   `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
+                const detailApiUrl = API_CONFIG.BASE_URL.replace('getElevatorListM', 'getElevatorViewM') + `?serviceKey=${API_CONFIG.SERVICE_KEY}&elevatorNo=${safeElevatorNo}&_type=json`;
                 
                 const res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(detailApiUrl));
                 const data = await res.json();
                 
-                // 기본값 세팅
                 let displayStateText = "확인불가";
                 let shuttleSec = elv.shuttleSection; 
 
-                // 공공데이터 응답이 정상일 때만 원본 텍스트로 덮어씌움
                 if (data.response?.body?.items?.item) {
                     let item = Array.isArray(data.response.body.items.item) ? data.response.body.items.item[0] : data.response.body.items.item;
+                    // 공공데이터 원본 값 그대로 사용
                     displayStateText = item.elvtrSttsNm || item.elvtr_stts_nm || item.elvtrStts || "상태불명";
                     if(item.shuttleSection || item.shuttle_section) {
                         shuttleSec = item.shuttleSection || item.shuttle_section;
                     }
                 }
 
-                // 운행 상태 구분 (색상 결정용)
                 const isOperating = !(displayStateText.includes('정지') || displayStateText.includes('중지') || displayStateText.includes('불합격') || displayStateText.includes('고장') || displayStateText.includes('휴지') || displayStateText.includes('폐기') || displayStateText.includes('검사연기') || displayStateText.includes('폐지') || displayStateText.includes('확인불가'));
                 
                 elv.scanned = true;
@@ -945,12 +965,11 @@
                 elv.state = displayStateText;
                 elv.shuttleSection = shuttleSec;
 
-                // UI 업데이트 (가공 없이 원본 텍스트 그대로 적용)
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
                 if (statusEl) {
                     const badgeBg = isOperating ? "#1e4e79" : "#d32f2f";
                     statusEl.style.background = badgeBg; 
-                    statusEl.innerText = displayStateText; // 💡 여기서 '정상운행' 임의 변환 없이 API 원본값을 씁니다
+                    statusEl.innerText = displayStateText; // 💡 임의 변환 없이 원본 그대로 노출
                 }
 
                 const shuttleEl = document.getElementById(`shuttle-${elv.elevatorNo}`);
@@ -958,10 +977,7 @@
 
             } catch(e) {
                 const statusEl = document.getElementById(`status-${elv.elevatorNo}`);
-                if (statusEl) { 
-                    statusEl.style.background = "#d32f2f"; 
-                    statusEl.innerText = "통신오류"; 
-                }
+                if (statusEl) { statusEl.style.background = "#d32f2f"; statusEl.innerText = "통신오류"; }
             }
         });
     }
