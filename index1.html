@@ -329,15 +329,18 @@
         
         const rClean = roadKeyword ? roadKeyword.replace(/\s+/g, '').toLowerCase() : "";
         const rNum = roadNo ? roadNo.trim() : ""; 
-        const validPrefixes = SIDO_PREFIX_MAP[selectedSido] || []; 
 
         return items.filter(item => {
             let originalAddr = String(item.building_address || item.address1 || item.address || "");
             let addrStr = originalAddr.replace(/\s+/g, '').toLowerCase();
             
+            // 🚨 범인 체포: 지역명 비교 방식 개선
+            // "세종특별자치시"가 들어와도 앞 2글자("세종")만 따서 유연하게 검사합니다.
             if (selectedSido && selectedSido !== "전국") {
-                let matched = validPrefixes.some(prefix => originalAddr.includes(prefix) || (item.sido && String(item.sido).includes(prefix)));
-                if (!matched) return false; 
+                let shortSido = selectedSido.substring(0, 2); 
+                let matched = originalAddr.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
+                
+                if (!matched) return false; // 지역이 다르면 탈락
             }
             
             const matchNumber = (targetNum) => {
@@ -346,7 +349,10 @@
                 return regex.test(originalAddr);
             };
 
-            if (rClean && addrStr.includes(rClean) && matchNumber(rNum)) return true;
+            // 도로명과 번지수가 모두 일치하면 통과
+            if (rClean && addrStr.includes(rClean) && matchNumber(rNum)) {
+                return true;
+            }
             return false;
         });
     }
