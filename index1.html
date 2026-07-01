@@ -583,8 +583,20 @@
         const results = await Promise.all(fetchPromises);
         results.forEach(res => allPlaces.push(...res));
 
+        // 🚨 [핵심 추가] 카카오가 외곽 지역(소정면 등) 검색 시 옆동네(천안/아산)에서 끌고 온 데이터 거르기
+        const validPrefixes = SIDO_PREFIX_MAP[sido] || [sido];
+        let filteredPlaces = allPlaces.filter(p => {
+            let addr = p.road_address_name || p.address_name || "";
+            // 주소에 '세종' 등 선택한 시/도 명칭이 반드시 포함되어 있는 경우만 통과
+            return validPrefixes.some(prefix => addr.includes(prefix));
+        });
+
         const uniquePlaces = new Map();
-        allPlaces.forEach(p => { const addr = p.road_address_name || p.address_name; if (addr && !uniquePlaces.has(addr)) uniquePlaces.set(addr, p); });
+        // 필터링된 안전한 데이터만 가지고 중복 제거 진행
+        filteredPlaces.forEach(p => { 
+            const addr = p.road_address_name || p.address_name; 
+            if (addr && !uniquePlaces.has(addr)) uniquePlaces.set(addr, p); 
+        });
         let placeArray = Array.from(uniquePlaces.values());
         
         if (placeArray.length === 0) { hideLoadingMsg(); alert(`검색된 데이터가 없습니다.`); return; }
@@ -867,54 +879,47 @@
         clusterer.clear(); let newOverlays = []; let usedCoords = new Set(); 
 
         renderList.forEach(group => {
-        if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
-        
-        const content = document.createElement('div');
-        if (group.noElevator) {
-            content.className = 'custom-marker no-elv';
-            content.innerHTML = `<span>${group.buildingName} (승강기없음)</span>`;
-        } else if (group.isDummy) {
-            content.className = 'custom-marker dummy';
-            content.innerHTML = `<span>${group.buildingName}</span><span style="background:#eee; color:#777; padding:1px 4px; border-radius:4px; margin-left:4px; font-size:10.5px;">스캔대기</span>`;
-        } else {
-            content.className = 'custom-marker';
-            content.innerHTML = `<span>${group.buildingName} (${group.elevators.length}대)</span>`;
-        }
+            if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
+            
+            const content = document.createElement('div');
+            
+            // 🚨 해당 건물의 모든 승강기가 운행 정지(false)인지 확인
+            const isAllStopped = group.elevators.length > 0 && group.elevators.every(elv => !elv.isOperating);
 
-        // 클릭 이벤트 바인딩
-        content.onclick = function(event) { if (event) event.stopPropagation(); openBottomSheet(group); };
-
-        // 🚨 [핵심 추가] 레이어 간섭 해제 및 마우스 오버 시 최상위 격상 로직
-        // 튀어나온 영역에 마우스가 진입하면 카카오맵 내부 래퍼(parentElement)를 맨 앞으로 가져옵니다.
-        content.onmouseenter = function() {
-            if (this.parentElement && this.parentElement.parentElement) {
-                this.parentElement.parentElement.style.zIndex = "100";
+            if (group.noElevator) {
+                content.className = 'custom-marker no-elv';
+                content.innerHTML = `<span>${group.buildingName} (승강기없음)</span>`;
+            } else if (group.isDummy) {
+                content.className = 'custom-marker dummy';
+                content.innerHTML = `<span>${group.buildingName}</span><span style="background:#eee; color:#777; padding:1px 4px; border-radius:4px; margin-left:4px; font-size:10.5px;">스캔대기</span>`;
+            } else {
+                // 🚨 모두 정지 상태면 빨간색 라벨(stopped) 적용
+                content.className = isAllStopped ? 'custom-marker stopped' : 'custom-marker';
+                content.innerHTML = `<span>${group.buildingName} (${group.elevators.length}대)</span>`;
             }
-        };
-        content.onmouseleave = function() {
-            if (this.parentElement && this.parentElement.parentElement) {
-                // 원상 복구 (더미 여부에 따라 기본 레이어 순위 배정)
-                this.parentElement.parentElement.style.zIndex = group.isDummy ? "19" : "20";
-            }
-        };
 
-        let lat = group.lat; let lng = group.lng; let coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`; let offsetMultiplier = 1;
-        while (usedCoords.has(coordKey)) { lat += 0.00015 * offsetMultiplier; lng -= 0.00015 * offsetMultiplier; coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`; offsetMultiplier++; }
-        usedCoords.add(coordKey);
+            content.onclick = function(event) { if (event) event.stopPropagation(); openBottomSheet(group); };
 
-        // 오버레이 객체 생성 시 기본 zIndex 구조 보정 효과를 주기 위해 래퍼 핸들링 활성화
-        newOverlays.push(new kakao.maps.CustomOverlay({ 
-            position: new kakao.maps.LatLng(lat, lng), 
-            content: content, 
-            yAnchor: 1, 
-            clickable: true 
-        }));
-    });
+            content.onmouseenter = function() {
+                if (this.parentElement && this.parentElement.parentElement) {
+                    this.parentElement.parentElement.style.zIndex = "100";
+                }
+            };
+            content.onmouseleave = function() {
+                if (this.parentElement && this.parentElement.parentElement) {
+                    this.parentElement.parentElement.style.zIndex = group.isDummy ? "19" : "20";
+                }
+            };
+
+            let lat = group.lat; let lng = group.lng; let coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`; let offsetMultiplier = 1;
+            while (usedCoords.has(coordKey)) { lat += 0.00015 * offsetMultiplier; lng -= 0.00015 * offsetMultiplier; coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`; offsetMultiplier++; }
+            usedCoords.add(coordKey);
+
+            newOverlays.push(new kakao.maps.CustomOverlay({ position: new kakao.maps.LatLng(lat, lng), content: content, yAnchor: 1, clickable: true }));
+        });
         
         clusterer.addMarkers(newOverlays);
         
-        // 🚨 지도가 제멋대로 움직이던 범인 체포 🚨
-        // preventMove가 true일 때(마커 클릭 시)는 지도를 줌/이동하지 않고 그대로 둡니다!
         if (!preventMove) {
             if (renderList.length === 1) {
                 map.setLevel(5); setTimeout(() => { map.panTo(new kakao.maps.LatLng(renderList[0].lat, renderList[0].lng)); }, 100);
@@ -1061,14 +1066,10 @@
         document.getElementById('bottomSheet').classList.add('active');
         const listContainer = document.getElementById('elevatorListContainer');
 
-        // 🚨 범인 1: 강제로 지도를 위로 밀어올리던 panTo, panBy 삭제 완료!
-
         if (groupData.isDummy) {
             listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ 승강기 정보 분석 중...<br><span style="font-size:12px; color:#666;">(잠시만 기다려주세요)</span></div>';
             
             await hydrateDummyGroup(groupData, new AbortController().signal);
-            
-            // 🚨 범인 2: 마커 글자만 갱신하고, 지도는 움직이지 마라! (true 전달)
             renderData(true); 
             
             if (groupData.noElevator || groupData.elevators.length === 0) {
@@ -1080,9 +1081,10 @@
         
         document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
 
+        // 🚨 타이틀 부분에 승강기 번호 추가: #${i+1} 호기 (${elv.elevatorNo})
         listContainer.innerHTML = groupData.elevators.map((elv, i) => `
             <div class="elv-item-title">
-                <span>#${i+1} 호기 </span>
+                <span>#${i+1} 호기 (${elv.elevatorNo})</span> 
                 <span id="status-${elv.elevatorNo}" class="status-badge" style="background:#94a3b8;">조회중...⏳</span>
             </div>
             <table class="data-table">
