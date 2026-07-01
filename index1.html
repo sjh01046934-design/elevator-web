@@ -376,25 +376,24 @@
         return items.filter(item => {
             let originalAddr = String(item.building_address || item.address1 || item.address || "");
             
-            // 1. 시/도 지역 필터링 (세종특별자치시 유연 대응)
+            // 1. 🚨 시/도 지역 필터링 (세종대로 등 타지역 오차 완벽 차단)
             if (selectedSido && selectedSido !== "전국") {
                 let shortSido = selectedSido.substring(0, 2); 
-                let matched = originalAddr.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
+                // 주소의 가장 첫 번째 단어(예: 서울특별시, 세종특별자치시)만 추출해서 비교
+                let addrFirstWord = originalAddr.trim().split(/\s+/)[0]; 
+                let matched = addrFirstWord.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
+                
                 if (!matched) return false; 
             }
             
-            // 2. 🚨 도로명 + 번지수 핀포인트 필터링
+            // 2. 도로명 + 번지수 핀포인트 필터링
             if (rClean && rNum) {
                 const safeRoad = rClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 const safeNum = rNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                
-                // 정규식 해설: 도로명과 번호가 붙어있고, 그 뒤에 '길'이나 다른 숫자가 오면 쳐냄
-                // 허용: "성내로 32", "성내로 32-1", "성내로 32 (성내동)"
-                // 차단: "성내로6길 32", "성내로 32길"
                 const exactMatchRegex = new RegExp(`${safeRoad}\\s*${safeNum}(?:-[0-9]+)?(?:\\s|\\(|,|$)`);
                 
                 if (!exactMatchRegex.test(originalAddr)) {
-                    return false; // 조건에 안 맞으면 칼같이 버림
+                    return false; 
                 }
             } else if (rClean) {
                 if (!originalAddr.replace(/\s+/g, '').includes(rClean.replace(/\s+/g, ''))) return false;
