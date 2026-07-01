@@ -57,9 +57,40 @@
         .data-table th, .data-table td { border: 1px solid #dcdcdc; padding: 8px 4px; word-break: keep-all; }
         .data-table th { background-color: #f8fafc; color: #555; font-weight: bold; width: 22%; }
         .data-table td { font-weight: 600; color: #111; width: 28%; }
-        .custom-marker { background-color: #1e4e79; color: white; padding: 6px 12px; border-radius: 8px; font-size: 12.5px; font-weight: bold; box-shadow: 0 4px 8px rgba(0,0,0,0.3); position: relative; white-space: nowrap; cursor: pointer; bottom: 24px; display: flex; align-items: center; gap: 4px; border: 1.5px solid rgba(255,255,255,0.8); transition: transform 0.1s; letter-spacing: -0.5px;}
+        .custom-marker { 
+            background-color: #1e4e79; 
+            color: white; 
+            padding: 6px 12px; 
+            border-radius: 8px; 
+            font-size: 12.5px; 
+            font-weight: bold; 
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3); 
+            position: relative; 
+            white-space: nowrap; 
+            cursor: pointer; 
+            display: flex; 
+            align-items: center; 
+            gap: 4px; 
+            border: 1.5px solid rgba(255,255,255,0.8); 
+            transition: transform 0.1s; 
+            letter-spacing: -0.5px;
+            /* bottom: 24px; 제거 -> 실제 클릭 영역과 일치시킴 */
+            margin-bottom: 12px; /* 안전 마진 확보 */
+            pointer-events: auto;
+        }
         .custom-marker:active { transform: scale(0.95); }
-        .custom-marker::after { content: ''; position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); border-width: 6px 6px 0; border-style: solid; border-color: #1e4e79 transparent; display: block; width: 0; }
+        .custom-marker::after { 
+            content: ''; 
+            position: absolute; 
+            bottom: -7px; /* 마진 조정에 따른 꼬리표 위치 보정 */
+            left: 50%; 
+            transform: translateX(-50%); 
+            border-width: 7px 6px 0; 
+            border-style: solid; 
+            border-color: #1e4e79 transparent; 
+            display: block; 
+            width: 0; 
+        }
         .custom-marker.stopped { background-color: #d32f2f; border-color: #ffcccc;}
         .custom-marker.stopped::after { border-color: #d32f2f transparent; }
         .custom-marker.dummy { background-color: #fff; color: #333; border: 1px solid #ccc; box-shadow: 0 2px 6px rgba(0,0,0,0.15);}
@@ -837,28 +868,49 @@
         clusterer.clear(); let newOverlays = []; let usedCoords = new Set(); 
 
         renderList.forEach(group => {
-            if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
-            
-            const content = document.createElement('div');
-            if (group.noElevator) {
-                content.className = 'custom-marker no-elv';
-                content.innerHTML = `<span>${group.buildingName} (승강기없음)</span>`;
-            } else if (group.isDummy) {
-                content.className = 'custom-marker dummy';
-                content.innerHTML = `<span>${group.buildingName}</span><span style="background:#eee; color:#777; padding:1px 4px; border-radius:4px; margin-left:4px; font-size:10.5px;">스캔대기</span>`;
-            } else {
-                content.className = 'custom-marker';
-                content.innerHTML = `<span>${group.buildingName} (${group.elevators.length}대)</span>`;
+        if(group.lat === 0 || group.lng === 0 || group.lat === null) return; 
+        
+        const content = document.createElement('div');
+        if (group.noElevator) {
+            content.className = 'custom-marker no-elv';
+            content.innerHTML = `<span>${group.buildingName} (승강기없음)</span>`;
+        } else if (group.isDummy) {
+            content.className = 'custom-marker dummy';
+            content.innerHTML = `<span>${group.buildingName}</span><span style="background:#eee; color:#777; padding:1px 4px; border-radius:4px; margin-left:4px; font-size:10.5px;">스캔대기</span>`;
+        } else {
+            content.className = 'custom-marker';
+            content.innerHTML = `<span>${group.buildingName} (${group.elevators.length}대)</span>`;
+        }
+
+        // 클릭 이벤트 바인딩
+        content.onclick = function(event) { if (event) event.stopPropagation(); openBottomSheet(group); };
+
+        // 🚨 [핵심 추가] 레이어 간섭 해제 및 마우스 오버 시 최상위 격상 로직
+        // 튀어나온 영역에 마우스가 진입하면 카카오맵 내부 래퍼(parentElement)를 맨 앞으로 가져옵니다.
+        content.onmouseenter = function() {
+            if (this.parentElement && this.parentElement.parentElement) {
+                this.parentElement.parentElement.style.zIndex = "100";
             }
+        };
+        content.onmouseleave = function() {
+            if (this.parentElement && this.parentElement.parentElement) {
+                // 원상 복구 (더미 여부에 따라 기본 레이어 순위 배정)
+                this.parentElement.parentElement.style.zIndex = group.isDummy ? "19" : "20";
+            }
+        };
 
-            content.onclick = function(event) { if (event) event.stopPropagation(); openBottomSheet(group); };
+        let lat = group.lat; let lng = group.lng; let coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`; let offsetMultiplier = 1;
+        while (usedCoords.has(coordKey)) { lat += 0.00015 * offsetMultiplier; lng -= 0.00015 * offsetMultiplier; coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`; offsetMultiplier++; }
+        usedCoords.add(coordKey);
 
-            let lat = group.lat; let lng = group.lng; let coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`; let offsetMultiplier = 1;
-            while (usedCoords.has(coordKey)) { lat += 0.00015 * offsetMultiplier; lng -= 0.00015 * offsetMultiplier; coordKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`; offsetMultiplier++; }
-            usedCoords.add(coordKey);
-
-            newOverlays.push(new kakao.maps.CustomOverlay({ position: new kakao.maps.LatLng(lat, lng), content: content, yAnchor: 1, clickable: true }));
-        });
+        // 오버레이 객체 생성 시 기본 zIndex 구조 보정 효과를 주기 위해 래퍼 핸들링 활성화
+        newOverlays.push(new kakao.maps.CustomOverlay({ 
+            position: new kakao.maps.LatLng(lat, lng), 
+            content: content, 
+            yAnchor: 1, 
+            clickable: true 
+        }));
+    });
         
         clusterer.addMarkers(newOverlays);
         
