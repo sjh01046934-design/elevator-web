@@ -100,7 +100,11 @@
     </style>
 </head>
 <body>
-
+<div id="mainLoading" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.95); padding: 25px 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 9999; text-align: center; border: 1px solid #eee;">
+    <div style="font-size: 30px; margin-bottom: 15px;">⏳</div>
+    <div style="color: #1e4e79; font-weight: bold; font-size: 16px; margin-bottom: 8px;">승강기 데이터 조회 중...</div>
+    <div style="color: #666; font-size: 13px;">잠시만 기다려 주세요.</div>
+</div>
 <div class="app-container">
     <div id="map"></div>
 
@@ -905,6 +909,7 @@ let debounceTimer;
     }
 
     async function executeBroadSearch() {
+        document.getElementById('mainLoading').style.display = 'block';
         const query = document.getElementById('searchInput').value.trim();
         const sido = document.getElementById('sidoSelector').value; 
         const searchType = document.getElementById('searchType').value; 
@@ -1015,6 +1020,10 @@ let debounceTimer;
             buildGlobalGroups();
 
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
+        finally {
+        // 🚨 2. 데이터 처리가 끝난 직후(성공/실패 무관): 로딩 화면 끄기
+        document.getElementById('mainLoading').style.display = 'none';
+    }
     }
 
     function buildGlobalGroups() {
@@ -1086,12 +1095,12 @@ let debounceTimer;
                 }
                 
                 await new Promise(res => setTimeout(res, index * 100)); 
-                
-                geocoder.addressSearch(group.address, function(result, status) {
-                    if (status === kakao.maps.services.Status.OK) { group.lat = parseFloat(result[0].y); group.lng = parseFloat(result[0].x); } 
-                    else { group.lat = 36.3504 + (Math.random() - 0.5) * 0.05; group.lng = 127.3845 + (Math.random() - 0.5) * 0.05; }
-                    geocodeCache.set(group.address, {lat: group.lat, lng: group.lng}); resolve();
-                });
+                let cleanAddress = item.building_address.replace(/외\s*\d+필지/g, '').trim();
+                geocoder.addressSearch(cleanAddress, function(result, status) {
+    if (status === kakao.maps.services.Status.OK) {
+        // 마커 생성 로직...
+    }
+});
             });
         })).then(() => { renderData(); });
     }
