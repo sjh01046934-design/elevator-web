@@ -708,14 +708,19 @@
             
             try {
                 if (searchType === 'building') {
-                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`).limit(500);
+                    // 🚨 [개선] 전국 단위로 500건을 무조건 가져오던 방식에서, 선택 지역 조건(building_address)을 쿼리에 추가하여 타지역 유출 방지
+                    let queryBuilder = supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`);
+                    if (sido && sido !== "전국") {
+                        let shortSido = sido.substring(0, 2);
+                        queryBuilder = queryBuilder.ilike('building_address', `%${shortSido}%`);
+                    }
+                    const { data, error } = await queryBuilder.limit(500);
                     if (error) console.warn("Supabase 에러 방어:", error);
                     if (data) dbItems = data;
                 } else {
                     const rParams = extractAddressParams(query);
                     let rSearchPattern = "";
                     
-                    // 🚨 DB 검색 시 '구/군(sigungu)'이 있으면 포함해서 검색 (속도/정확도 상승)
                     if (rParams.searchKeyword && rParams.address2) {
                         let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
                         rSearchPattern = rParams.sigungu ? 
@@ -736,10 +741,21 @@
             if (dbItems.length > 0) {
                 validItems = dbItems.filter(item => {
                     if (searchType === 'building') {
-                        return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                        // 1. 건물명 매칭 확인
+                        let nameMatch = String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                        if (!nameMatch) return false;
+                        
+                        // 🚨 2. [핵심 추가] 건물명 필터링 단계에서도 지역(시/도) 첫 단어를 엄격하게 체크
+                        if (sido && sido !== "전국") {
+                            let shortSido = sido.substring(0, 2);
+                            let originalAddr = String(item.building_address || item.address1 || item.address || "");
+                            let addrFirstWord = originalAddr.trim().split(/\s+/)[0];
+                            let matched = addrFirstWord.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
+                            if (!matched) return false;
+                        }
+                        return true;
                     } else {
                         const params = extractAddressParams(query);
-                        // 새로고친 철통 검문소 통과 여부 확인
                         return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
                     }
                 });
@@ -751,7 +767,18 @@
                 
                 validItems = items.filter(item => {
                     if (searchType === 'building') {
-                        return String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                        let nameMatch = String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
+                        if (!nameMatch) return false;
+                        
+                        // 🚨 공공데이터 Fallback 결과물에도 시/도 지역 필터링 동일하게 적용
+                        if (sido && sido !== "전국") {
+                            let shortSido = sido.substring(0, 2);
+                            let originalAddr = String(item.building_address || item.address1 || item.address || "");
+                            let addrFirstWord = originalAddr.trim().split(/\s+/)[0];
+                            let matched = addrFirstWord.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
+                            if (!matched) return false;
+                        }
+                        return true;
                     } else {
                         const params = extractAddressParams(query);
                         return filterValidElevators([item], null, params.searchKeyword, params.address2, null, null, apiSido).length > 0;
