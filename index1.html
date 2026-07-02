@@ -263,24 +263,34 @@ let debounceTimer;
         const searchType = document.getElementById('searchType').value;
         const sido = document.getElementById('sidoSelector').value;
 
+        // 🚨 한글 인코딩 문제로 '릫', '딯' 문자가 깨지는 것을 원천 차단하기 위해 유니코드로 변경했습니다.
         const chosungMap = {
-            'ㄱ': '[가-깋]', 'ㄲ': '[까-낗]', 'ㄴ': '[나-닣]', 'ㄷ': '[다-딯]', 'ㄸ': '[따-띻]',
-            'ㄹ': '[라-릫]', 'ㅁ': '[마-믷]', 'ㅂ': '[바-빟]', 'ㅃ': '[빠-삫]', 'ㅅ': '[사-싷]',
-            'ㅆ': '[싸-앃]', 'ㅇ': '[아-잏]', 'ㅈ': '[자-짛]', 'ㅉ': '[짜-찧]', 'ㅊ': '[차-칳]',
-            'ㅋ': '[카-킿]', 'ㅌ': '[타-틯]', 'ㅍ': '[파-핗]', 'ㅎ': '[하-힣]',
-            'ㄳ': '[가-깋][사-싷]', 'ㄵ': '[나-닣][자-짛]', 'ㄶ': '[나-닣][하-힣]', 
-            'ㄺ': '[라-릫][가-깋]', 'ㄻ': '[라-릫][마-믷]', 'ㄼ': '[라-릫][바-빟]', 
-            'ㄽ': '[라-릫][사-싷]', 'ㄾ': '[라-릫][타-틯]', 'ㄿ': '[라-릫][파-핗]', 
-            'ㅀ': '[라-릫][하-힣]', 'ㅄ': '[바-빟][사-싷]'
+            'ㄱ': '[\uAC00-\uAE4B]', 'ㄲ': '[\uAE4C-\uB097]', 'ㄴ': '[\uB098-\uB2E3]', 'ㄷ': '[\uB2E4-\uB52F]', 'ㄸ': '[\uB530-\uB77B]',
+            'ㄹ': '[\uB77C-\uB9C7]', 'ㅁ': '[\uB9C8-\uBC13]', 'ㅂ': '[\uBC14-\uBE5F]', 'ㅃ': '[\uBE60-\uC0AB]', 'ㅅ': '[\uC0AC-\uC2F7]',
+            'ㅆ': '[\uC2F8-\uC543]', 'ㅇ': '[\uC544-\uC78F]', 'ㅈ': '[\uC790-\uC9DB]', 'ㅉ': '[\uC9DC-\uCC27]', 'ㅊ': '[\uCC28-\uCE73]',
+            'ㅋ': '[\uCE74-\uD0BF]', 'ㅌ': '[\uD0C0-\uD30B]', 'ㅍ': '[\uD30C-\uD557]', 'ㅎ': '[\uD558-\uD7A3]'
+        };
+        
+        // 겹받침 유니코드 매핑
+        const doubleMap = {
+            'ㄳ': '[\uAC00-\uAE4B]\\s*[\uC0AC-\uC2F7]', 'ㄵ': '[\uB098-\uB2E3]\\s*[\uC790-\uC9DB]', 
+            'ㄶ': '[\uB098-\uB2E3]\\s*[\uD558-\uD7A3]', 'ㄺ': '[\uB77C-\uB9C7]\\s*[\uAC00-\uAE4B]', 
+            'ㄻ': '[\uB77C-\uB9C7]\\s*[\uB9C8-\uBC13]', 'ㄼ': '[\uB77C-\uB9C7]\\s*[\uBC14-\uBE5F]', 
+            'ㄽ': '[\uB77C-\uB9C7]\\s*[\uC0AC-\uC2F7]', 'ㄾ': '[\uB77C-\uB9C7]\\s*[\uD0C0-\uD30B]', 
+            'ㄿ': '[\uB77C-\uB9C7]\\s*[\uD30C-\uD557]', 'ㅀ': '[\uB77C-\uB9C7]\\s*[\uD558-\uD7A3]', 
+            'ㅄ': '[\uBC14-\uBE5F]\\s*[\uC0AC-\uC2F7]'
         };
         
         let pattern = "";
         const specialChars = /[.*+?^${}()|[\]\\]/g;
         for (let char of query) {
             if (chosungMap[char]) {
-                pattern += chosungMap[char];
+                // 🚨 띄어쓰기 허용: DB에 '한누리 대로 25'처럼 공백이 있어도 무시하고 매칭되도록 \s* 를 추가
+                pattern += chosungMap[char] + "\\s*";
+            } else if (doubleMap[char]) {
+                pattern += doubleMap[char] + "\\s*";
             } else {
-                pattern += char.replace(specialChars, '\\$&'); 
+                pattern += char.replace(specialChars, '\\$&') + "\\s*"; 
             }
         }
 
@@ -316,7 +326,6 @@ let debounceTimer;
                     const div = document.createElement('div');
                     div.className = 'dropdown-item';
                     
-                    // 🚨 핵심 포인트: 도로명 검색일 때는 주소를 파란색 굵은 글씨로 위로 올림
                     let primaryText = searchType === 'address' ? `📍 ${item.building_address}` : `🏢 ${item.buld_nm}`;
                     let secondaryText = searchType === 'address' ? `🏢 ${item.buld_nm}` : `📍 ${item.building_address}`;
 
