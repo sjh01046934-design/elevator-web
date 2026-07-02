@@ -276,109 +276,7 @@
 
         const searchType = document.getElementById('searchType').value;
         const sido = document.getElementById('sidoSelector').value;
-        const isChosung = /^[ㄱ-ㅎ\s]+$/.test(query);
-
-        console.log(`\n🟢 === [자동완성 검색 시작] ===`);
-        console.log(`👉 입력어: '${query}' | 검색유형: ${searchType} | 지역: ${sido} | 100%초성여부: ${isChosung}`);
-
-        // ==========================================
-        // 🚀 1. 상호명 검색일 경우 -> 카카오 API 호출
-        // ==========================================
-        if (searchType === 'place') {
-            let searchQuery = query;
-
-            if (isChosung) {
-                const dict = {
-                    'ㅂㅇ': '병원', 'ㅈㅎㅂㅇ': '종합병원', 'ㄷㅎㅂㅇ': '대학병원', 'ㅎㅂㅂㅇ': '한방병원', 'ㅇㄹㅇ': '의료원',
-                    'ㄴㄱ': '내과', 'ㅈㅎㅇㄱ': '정형외과', 'ㅇㅂㅇㅎㄱ': '이비인후과', 'ㅅㅇㄱ': '소아과', 'ㅅㅂㅇㄱ': '산부인과',
-                    'ㅊㄱ': '치과', 'ㅍㅂㄱ': '피부과', 'ㅇㄱㅅ': '응급실', 'ㅂㄱㅅ': '보건소', 'ㅇㅇㅂㅇ': '요양병원', 'ㅇㄱ': '약국',
-                    'ㅈㅁㅅㅌ': '주민센터', 'ㅎㅈㅂㅈㅅㅌ': '행정복지센터', 'ㅅㅊ': '시청', 'ㄷㅊ': '도청', 'ㄱㅊ': '구청',
-                    'ㄱㅊㅅ': '경찰서', 'ㅈㄱㄷ': '지구대', 'ㅍㅊㅅ': '파출소', 'ㅅㅂㅅ': '소방서', 'ㅇㅈㅅㅌ': '안전센터',
-                    'ㅇㅊㄱ': '우체국', 'ㅅㅁㅅ': '세무서', 'ㄱㅇㅊ': '교육청',
-                    'ㅈㅎㅊ': '지하철', 'ㅈㅎㅊㅇ': '지하철역', 'ㄱㅊㅇ': '기차역', 'ㅎㅅㅅㅌ': '환승센터',
-                    'ㄱㅅㅂㅅㅌㅁㄴ': '고속버스터미널', 'ㅅㅇㅂㅅㅌㅁㄴ': '시외버스터미널', 'ㅂㅅㅌㅁㄴ': '버스터미널', 'ㄱㅎ': '공항',
-                    'ㅂㅈㄱ': '복지관', 'ㅈㅇㅇㅂㅈㄱ': '장애인복지관', 'ㄴㅇㅂㅈㄱ': '노인복지관',
-                    'ㅈㅎㅅㅎㅂㅈㄱ': '종합사회복지관', 'ㅇㅇㅇ': '요양원', 'ㄱㄹㄷ': '경로당', 'ㅈㅇㅇㄷㅅㅌ': '지역아동센터',
-                    'ㅇㅎㄱ': '영화관', 'ㅆㅈㅂㅇ': 'CGV', 'ㄹㄷㅅㄴㅁ': '롯데시네마', 'ㅁㄱㅂㅅ': '메가박스',
-                    'ㄷㅅㄱ': '도서관', 'ㅂㅎㅈ': '백화점', 'ㄷㅎㅁㅌ': '대형마트', 'ㅅㅈ': '시장',
-                    'ㅍㅇㅈ': '편의점', 'ㅈㅇㅅ': 'GS25', 'ㅆㅇ': 'CU', 'ㅅㅂㅇㄹㅂ': '세븐일레븐', 'ㅇㅁㅌㅇㅅㅅ': '이마트24',
-                    'ㅁㄴㅅㅌ': '미니스톱', 'ㅎㅍㄹㅅ': '홈플러스', 'ㅇㅁㅌ': '이마트',
-                    'ㅇㅎ': '은행', 'ㄱㅁㅇㅎ': '국민은행', 'ㅅㅎㅇㅎ': '신한은행', 'ㅇㄹㅇㅎ': '우리은행', 
-                    'ㅎㄴㅇㅎ': '하나은행', 'ㄴㅎ': '농협', 'ㄱㅇㅇㅎ': '기업은행', 'ㅅㅁㅇㄱㄱ': '새마을금고',
-                    'ㅅㅌㅂㅅ': '스타벅스', 'ㅂㄱㅋ': '버거킹', 'ㅁㄷㄴㄷ': '맥도날드', 'ㄹㄷㄹㅇ': '롯데리아',
-                    'ㅇㄷㅇ': '이디야', 'ㅌㅅㅍㄹㅅ': '투썸플레이스', 'ㅍㅂㄱㅌ': '파리바게뜨', 'ㄸㄹㅈㄹ': '뚜레쥬르',
-                    'ㄷㅇㅅ': '다이소', 'ㅇㄹㅂㅇ': '올리브영', 'ㅂㅅㅋㄹㅂㅅ': '배스킨라빈스',
-                    'ㅋㅍㅂ': '커피빈', 'ㅁㄱㅋㅍ': '메가커피', 'ㅃㄷㅂ': '빽다방', 'ㅎㄹㅅ': '할리스'
-                };
-                const cleanQuery = query.replace(/\s+/g, '');
-                
-                let matchedKeyword = null;
-                for (const [key, value] of Object.entries(dict)) {
-                    if (key.startsWith(cleanQuery)) {
-                        matchedKeyword = value;
-                        break;
-                    }
-                }
-                
-                if (matchedKeyword) {
-                    searchQuery = matchedKeyword; 
-                } else {
-                    dropdown.style.display = 'none';
-                    return; 
-                }
-            }
-
-            const ps = new kakao.maps.services.Places();
-            let keyword = (sido && sido !== "전국") ? `${sido} ${searchQuery}` : searchQuery;
-            
-            ps.keywordSearch(keyword, function(data, status) {
-                if (status === kakao.maps.services.Status.OK) {
-                    dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 상호명 (카카오 연동)</div>`;
-                    data.slice(0, 10).forEach(item => {
-                        const div = document.createElement('div');
-                        div.className = 'dropdown-item';
-                        div.innerHTML = `
-                            <div class="item-text" onmousedown="selectAutocomplete('${item.place_name.replace(/'/g, "\\'")}', '${item.road_address_name || item.address_name}')" ontouchstart="selectAutocomplete('${item.place_name.replace(/'/g, "\\'")}', '${item.road_address_name || item.address_name}')">
-                                <span style="font-weight:bold; color:#1e4e79;">🏪 ${item.place_name}</span>
-                                <span style="font-size:11px; color:#666;">${item.road_address_name || item.address_name}</span>
-                            </div>
-                        `;
-                        dropdown.appendChild(div);
-                    });
-                    dropdown.style.display = 'block';
-                } else {
-                    dropdown.style.display = 'none';
-                }
-            });
-            return; 
-        }
-
-        // ==========================================
-        // 🚀 2. 건물명 / 도로명 검색일 경우 -> Supabase 초성 검색
-        // ==========================================
-        const chosungMap = {
-            'ㄱ': '[\uAC00-\uAE4B]', 'ㄲ': '[\uAE4C-\uB097]', 'ㄴ': '[\uB098-\uB2E3]', 'ㄷ': '[\uB2E4-\uB52F]', 'ㄸ': '[\uB530-\uB77B]',
-            'ㄹ': '[\uB77C-\uB9C7]', 'ㅁ': '[\uB9C8-\uBC13]', 'ㅂ': '[\uBC14-\uBE5F]', 'ㅃ': '[\uBE60-\uC0AB]', 'ㅅ': '[\uC0AC-\uC2F7]',
-            'ㅆ': '[\uC2F8-\uC543]', 'ㅇ': '[\uC544-\uC78F]', 'ㅈ': '[\uC790-\uC9DB]', 'ㅉ': '[\uC9DC-\uCC27]', 'ㅊ': '[\uCC28-\uCE73]',
-            'ㅋ': '[\uCE74-\uD0BF]', 'ㅌ': '[\uD0C0-\uD30B]', 'ㅍ': '[\uD30C-\uD557]', 'ㅎ': '[\uD558-\uD7A3]'
-        };
-        const doubleMap = {
-            'ㄳ': '[\uAC00-\uAE4B][\uC0AC-\uC2F7]', 'ㄵ': '[\uB098-\uB2E3][\uC790-\uC9DB]', 'ㄶ': '[\uB098-\uB2E3][\uD558-\uD7A3]', 
-            'ㄺ': '[\uB77C-\uB9C7][\uAC00-\uAE4B]', 'ㄻ': '[\uB77C-\uB9C7][\uB9C8-\uBC13]', 'ㄼ': '[\uB77C-\uB9C7][\uBC14-\uBE5F]', 
-            'ㄽ': '[\uB77C-\uB9C7][\uC0AC-\uC2F7]', 'ㄾ': '[\uB77C-\uB9C7][\uD0C0-\uD30B]', 'ㄿ': '[\uB77C-\uB9C7][\uD30C-\uD557]', 
-            'ㅀ': '[\uB77C-\uB9C7][\uD558-\uD7A3]', 'ㅄ': '[\uBC14-\uBE5F][\uC0AC-\uC2F7]'
-        };
-        
-        let patternParts = [];
-        const specialChars = /[.*+?^${}()|[\]\\]/g;
-        for (let char of query) {
-            if (chosungMap[char]) patternParts.push(chosungMap[char]);
-            else if (doubleMap[char]) patternParts.push(doubleMap[char]);
-            else patternParts.push(char.replace(specialChars, '\\$&')); 
-        }
-
-        let pattern = patternParts.join("\\s?");
-        console.log(`🟣 [정규식 변환 완료] DB 질의용 패턴: ${pattern}`);
+        const hasChosung = /[ㄱ-ㅎ]/.test(query);
 
         try {
             let q = supabaseClient.from('elevators_raw').select('buld_nm, building_address');
@@ -388,10 +286,47 @@
                 q = q.ilike('building_address', `${shortSido}%`);
             }
 
-            if (searchType === 'building') {
-                q = q.filter('buld_nm', 'imatch', pattern);
-            } else if (searchType === 'address') {
-                q = q.filter('building_address', 'imatch', pattern);
+            // 🚨 [핵심 수정] 초성 여부에 따라 검색 엔진 분기
+            if (hasChosung) {
+                // 1) 초성이 하나라도 포함된 경우 -> 기존의 정규식(imatch) 로직 유지
+                const chosungMap = {
+                    'ㄱ': '[\uAC00-\uAE4B]', 'ㄲ': '[\uAE4C-\uB097]', 'ㄴ': '[\uB098-\uB2E3]', 'ㄷ': '[\uB2E4-\uB52F]', 'ㄸ': '[\uB530-\uB77B]',
+                    'ㄹ': '[\uB77C-\uB9C7]', 'ㅁ': '[\uB9C8-\uBC13]', 'ㅂ': '[\uBC14-\uBE5F]', 'ㅃ': '[\uBE60-\uC0AB]', 'ㅅ': '[\uC0AC-\uC2F7]',
+                    'ㅆ': '[\uC2F8-\uC543]', 'ㅇ': '[\uC544-\uC78F]', 'ㅈ': '[\uC790-\uC9DB]', 'ㅉ': '[\uC9DC-\uCC27]', 'ㅊ': '[\uCC28-\uCE73]',
+                    'ㅋ': '[\uCE74-\uD0BF]', 'ㅌ': '[\uD0C0-\uD30B]', 'ㅍ': '[\uD30C-\uD557]', 'ㅎ': '[\uD558-\uD7A3]'
+                };
+                const doubleMap = {
+                    'ㄳ': '[\uAC00-\uAE4B][\uC0AC-\uC2F7]', 'ㄵ': '[\uB098-\uB2E3][\uC790-\uC9DB]', 'ㄶ': '[\uB098-\uB2E3][\uD558-\uD7A3]', 
+                    'ㄺ': '[\uB77C-\uB9C7][\uAC00-\uAE4B]', 'ㄻ': '[\uB77C-\uB9C7][\uB9C8-\uBC13]', 'ㄼ': '[\uB77C-\uB9C7][\uBC14-\uBE5F]', 
+                    'ㄽ': '[\uB77C-\uB9C7][\uC0AC-\uC2F7]', 'ㄾ': '[\uB77C-\uB9C7][\uD0C0-\uD30B]', 'ㄿ': '[\uB77C-\uB9C7][\uD30C-\uD557]', 
+                    'ㅀ': '[\uB77C-\uB9C7][\uD558-\uD7A3]', 'ㅄ': '[\uBC14-\uBE5F][\uC0AC-\uC2F7]'
+                };
+                
+                let patternParts = [];
+                const specialChars = /[.*+?^${}()|[\]\\]/g;
+                for (let char of query) {
+                    if (chosungMap[char]) patternParts.push(chosungMap[char]);
+                    else if (doubleMap[char]) patternParts.push(doubleMap[char]);
+                    else patternParts.push(char.replace(specialChars, '\\$&')); 
+                }
+
+                let pattern = patternParts.join("\\s?");
+                console.log(`🟣 [초성 정규식 변환] 패턴: ${pattern}`);
+
+                if (searchType === 'building') q = q.filter('buld_nm', 'imatch', pattern);
+                else if (searchType === 'address') q = q.filter('building_address', 'imatch', pattern);
+
+            } else {
+                // 2) 초성이 없는 일반 텍스트인 경우 -> 빠르고 100% 정확한 ilike 검색 사용
+                let safeQuery = query.replace(/\s+/g, '%'); // 공백을 %로 변환
+                safeQuery = safeQuery.replace(/([가-힣A-Za-z]+)(\d+)/g, '$1%$2'); // 글자 뒤 숫자 사이에 % (예: 산울2 -> 산울%2)
+                safeQuery = safeQuery.replace(/(\d+)([가-힣A-Za-z]+)/g, '$1%$2'); // 숫자 뒤 글자 사이에 % (예: 2로 -> 2%로)
+                let likePattern = '%' + safeQuery + '%';
+                
+                console.log(`🟣 [일반 검색 변환] 패턴: ${likePattern}`); // 로그 출력: %산울%2%로%
+
+                if (searchType === 'building') q = q.ilike('buld_nm', likePattern);
+                else if (searchType === 'address') q = q.ilike('building_address', likePattern);
             }
 
             console.log(`📡 [Supabase 요청 발송] 데이터를 기다리는 중...`);
