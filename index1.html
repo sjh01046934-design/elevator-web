@@ -1083,6 +1083,11 @@
     async function openBottomSheet(groupData) {
         document.getElementById('resBuildingName').innerText = groupData.buildingName;
         document.getElementById('resAddress').innerText = groupData.address;
+        
+        // 🚨 범인 체포: 누락되었던 로드뷰 및 길찾기 외부 링크 동적 매핑 로직 복구
+        document.getElementById('btnRoadview').href = `https://map.kakao.com/link/roadview/${groupData.lat},${groupData.lng}`;
+        document.getElementById('btnDirections').href = `https://map.kakao.com/link/to/${encodeURIComponent(groupData.buildingName)},${groupData.lat},${groupData.lng}`;
+        
         document.getElementById('bottomSheet').classList.add('active');
         const listContainer = document.getElementById('elevatorListContainer');
 
@@ -1101,7 +1106,6 @@
         
         document.getElementById('resTotalCount').innerText = `(${groupData.elevators.length}대)`;
 
-        // 🚨 타이틀 부분에 승강기 번호 추가: #${i+1} 호기 (${elv.elevatorNo})
         listContainer.innerHTML = groupData.elevators.map((elv, i) => `
             <div class="elv-item-title">
                 <span>#${i+1} 호기 (${elv.elevatorNo})</span> 
