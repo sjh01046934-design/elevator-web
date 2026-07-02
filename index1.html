@@ -74,15 +74,14 @@
             border: 1.5px solid rgba(255,255,255,0.8); 
             transition: transform 0.1s; 
             letter-spacing: -0.5px;
-            /* bottom: 24px; 제거 -> 실제 클릭 영역과 일치시킴 */
-            margin-bottom: 12px; /* 안전 마진 확보 */
+            margin-bottom: 12px;
             pointer-events: auto;
         }
         .custom-marker:active { transform: scale(0.95); }
         .custom-marker::after { 
             content: ''; 
             position: absolute; 
-            bottom: -7px; /* 마진 조정에 따른 꼬리표 위치 보정 */
+            bottom: -7px; 
             left: 50%; 
             transform: translateX(-50%); 
             border-width: 7px 6px 0; 
@@ -102,7 +101,7 @@
 <body>
 <div id="mainLoading" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.95); padding: 25px 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 9999; text-align: center; border: 1px solid #eee;">
     <div style="font-size: 30px; margin-bottom: 15px;">⏳</div>
-    <div style="color: #1e4e79; font-weight: bold; font-size: 16px; margin-bottom: 8px;">승강기 데이터 조회 중...</div>
+    <div style="color: #1e4e79; font-weight: bold; font-size: 16px; margin-bottom: 8px;">승강기 정보 조회중...</div>
     <div style="color: #666; font-size: 13px; margin-bottom: 20px;">지도에 표시중입니다. 잠시만 기다려 주세요.</div>
     <button onclick="cancelSearch()" style="background: #d32f2f; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); width: 100%;">✖ 검색 취소</button>
 </div>
@@ -161,7 +160,9 @@
                 <button onclick="cancelSearch()" class="cancel-btn">✕</button>
             </div>
         </div>
-    </div> <div class="bottom-sheet" id="bottomSheet">
+    </div> 
+    
+    <div class="bottom-sheet" id="bottomSheet">
         <div class="info-card">
             <div class="card-header">
                 <div class="elevator-icon-box">
@@ -187,7 +188,10 @@
             
             <div id="elevatorListContainer" class="elevator-list-scroll"></div>
         </div>
-    </div> </div> <script>
+    </div> 
+</div> 
+
+<script>
     let map, clusterer, geocoder, places;
     let lastQuery = '', lastSido = '';
     let allElevatorsData = [], globalGroups = [], geocodeCache = new Map(); 
@@ -256,9 +260,9 @@
             closeBottomSheet(); closeDropdown(); cancelSearch(); 
         });
     }
-let debounceTimer;
+    
+    let debounceTimer;
 
-    // 💡 [신규] 입력창에 글자 입력 시 실시간으로 초성/문자를 분석해 추천 검색어를 띄우는 함수
     async function handleAutocomplete() {
         const query = document.getElementById('searchInput').value.trim();
         const dropdown = document.getElementById('searchDropdown');
@@ -276,16 +280,6 @@ let debounceTimer;
 
         console.log(`\n🟢 === [자동완성 검색 시작] ===`);
         console.log(`👉 입력어: '${query}' | 검색유형: ${searchType} | 지역: ${sido} | 100%초성여부: ${isChosung}`);
-
-        // 🚨 [신규] 통신 대기 시간 동안 보여줄 '로딩 UI 템플릿' 정의 (모래시계 + 텍스트 + X버튼)
-        const loadingHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background-color: #f8f9fa; border-bottom: 1px solid #eee;">
-                <span style="color: #1e4e79; font-weight: bold; font-size: 14px;">⏳ 검색결과 조회중...</span>
-                <span style="color: #999; font-size: 18px; cursor: pointer; padding: 0 10px;" 
-                      onmousedown="document.getElementById('searchDropdown').style.display='none'; if(event) event.preventDefault();" 
-                      ontouchstart="document.getElementById('searchDropdown').style.display='none'; if(event) event.preventDefault();">✖</span>
-            </div>
-        `;
 
         // ==========================================
         // 🚀 1. 상호명 검색일 경우 -> 카카오 API 호출
@@ -337,10 +331,6 @@ let debounceTimer;
             const ps = new kakao.maps.services.Places();
             let keyword = (sido && sido !== "전국") ? `${sido} ${searchQuery}` : searchQuery;
             
-            // 🚨 [추가] 카카오 API 통신 직전에 로딩 화면 먼저 띄우기
-            dropdown.innerHTML = loadingHTML;
-            dropdown.style.display = 'block';
-
             ps.keywordSearch(keyword, function(data, status) {
                 if (status === kakao.maps.services.Status.OK) {
                     dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 상호명 (카카오 연동)</div>`;
@@ -404,10 +394,6 @@ let debounceTimer;
                 q = q.filter('building_address', 'imatch', pattern);
             }
 
-            // 🚨 [추가] DB에 복잡한 쿼리를 던지기 직전에 로딩 화면 띄우기
-            dropdown.innerHTML = loadingHTML;
-            dropdown.style.display = 'block';
-
             console.log(`📡 [Supabase 요청 발송] 데이터를 기다리는 중...`);
             const { data, error } = await q.limit(15);
             
@@ -451,11 +437,9 @@ let debounceTimer;
         }
     }
 
-    // 💡 [신규] 추천 검색어 클릭 시 입력창을 채우고 즉시 정밀 조회를 실행하는 함수
     function selectAutocomplete(buldNm, address) {
         const searchType = document.getElementById('searchType').value;
         
-        // 🚨 핵심 포인트: 도로명 검색 중이었다면 검색창에 '건물명' 대신 완성된 '주소'를 입력
         if (searchType === 'address') {
             document.getElementById('searchInput').value = address;
         } else {
@@ -467,10 +451,10 @@ let debounceTimer;
         if (searchType === 'place' || searchType === 'building') {
             fetchExactElevator(null, buldNm, address, address);
         } else {
-            // 주소가 검색창에 들어간 상태로 초고속 광역 스캔 시작
             executeBroadSearch();
         }
     }
+
     function resetMap() {
         cancelSearch(); document.getElementById('searchInput').value = '';
         closeBottomSheet(); closeDropdown();
@@ -490,9 +474,10 @@ let debounceTimer;
 
     function showLoadingMsg(text) { document.getElementById('loadingText').innerText = text; document.getElementById('searchLoadingMsg').style.display = 'block'; }
     function hideLoadingMsg() { 
-    document.getElementById('searchLoadingMsg').style.display = 'none'; 
-    document.getElementById('mainLoading').style.display = 'none'; 
-}
+        document.getElementById('searchLoadingMsg').style.display = 'none'; 
+        document.getElementById('mainLoading').style.display = 'none'; 
+    }
+    
     function cancelSearch() { if (currentAbortController) { currentAbortController.abort(); currentAbortController = null; } hideLoadingMsg(); }
 
     function fastSearch(event, sido, query, type) {
@@ -563,7 +548,6 @@ let debounceTimer;
     function extractAddressParams(fullAddress) {
         if (!fullAddress) return { searchKeyword: "", address2: "", sigungu: "" };
         
-        // 지역명 접두사 제거
         let clean = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\s]*\s+/, '');
         clean = clean.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2'); 
         
@@ -574,7 +558,6 @@ let debounceTimer;
         let searchKeyword = numIdx !== -1 ? (words[numIdx - 1] || "") : (words[words.length - 1] || "");
         let address2 = numIdx !== -1 ? words[numIdx] : "";
         
-        // 🚨 핵심 추가: 구/군 추출 (예: '강동구 성내로 32' -> '강동구')
         let sigungu = numIdx > 1 ? words[numIdx - 2] : ""; 
         
         return { 
@@ -593,17 +576,14 @@ let debounceTimer;
         return items.filter(item => {
             let originalAddr = String(item.building_address || item.address1 || item.address || "");
             
-            // 1. 🚨 시/도 지역 필터링 (세종대로 등 타지역 오차 완벽 차단)
             if (selectedSido && selectedSido !== "전국") {
                 let shortSido = selectedSido.substring(0, 2); 
-                // 주소의 가장 첫 번째 단어(예: 서울특별시, 세종특별자치시)만 추출해서 비교
                 let addrFirstWord = originalAddr.trim().split(/\s+/)[0]; 
                 let matched = addrFirstWord.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
                 
                 if (!matched) return false; 
             }
             
-            // 2. 도로명 + 번지수 핀포인트 필터링
             if (rClean && rNum) {
                 const safeRoad = rClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 const safeNum = rNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -621,8 +601,7 @@ let debounceTimer;
     }
 
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
-        // 🚨 문구 수정: '⏳ Supabase 자산 DB ~'에서 요구하신 문구로 변경
-        showLoadingMsg(`⏳ 승강기 정보 조회중..`);
+        showLoadingMsg(`⏳ 승강기 정보 조회중...`);
         try {
             const rParams = extractAddressParams(roadAddr);
             let rSearchPattern = "";
@@ -638,17 +617,16 @@ let debounceTimer;
 
             if (rSearchPattern) {
                 const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(200); 
-                if (error) console.warn("Supabase 에러:", error);
+                
+                if (error) console.error("[Query Error] Supabase 에러:", error);
                 
                 if (data && data.length > 0) {
-                    // 강력해진 검문소 통과
                     let validDbItems = filterValidElevators(data, null, rParams.searchKeyword, rParams.address2, null, null, apiSido);
                     if (validDbItems.length > 0) return validDbItems;
                 }
             }
-        } catch (e) { console.warn("Supabase 예외:", e.message); }
+        } catch (e) { console.error("Supabase 예외:", e.message); }
 
-        // DB 검색 실패 시 공공데이터 백업 호출
         const rParamsFallback = extractAddressParams(roadAddr);
         let combinedItems = [];
         if (rParamsFallback.searchKeyword) {
@@ -710,7 +688,6 @@ let debounceTimer;
                         } catch (err) { if (err.name !== 'AbortError') console.warn(err); }
                     }
                 }
-                console.log("🔍 API raw 데이터:", items); 
                 list.push(...items);
             }
         } catch (e) { if (e.name !== 'AbortError') console.error("공공데이터 호출 실패", e); }
@@ -741,8 +718,6 @@ let debounceTimer;
                     hideLoadingMsg(); 
                     if(allPlaces.length === 0) alert(`[${sido}] 지역에 "${query}" 상호가 검색되지 않습니다.`);
                     else {
-                        // 💡 [디버그 로그 1] 카카오 지도 API가 주는 전체 데이터 확인
-                        console.log("📍 [카카오 API 결과] 상호명 검색 원본:", allPlaces);
                         renderPlaceList(allPlaces, query); 
                     }
                 }
@@ -757,16 +732,12 @@ let debounceTimer;
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 전체를 스캔하세요👇</div>`;
         const sido = document.getElementById('sidoSelector').value; 
 
-        // 1. [광역스캔] 문구 수정 및 이모티콘 제거
         if (DISTRICT_MAP[sido] && sido !== "전국") {
             const megaScanDiv = document.createElement('div'); megaScanDiv.className = 'dropdown-item';
             megaScanDiv.innerHTML = `<div class="item-text" onmousedown="executeMegaScan(event, '${sido}', '${keyword}')" ontouchstart="executeMegaScan(event, '${sido}', '${keyword}')" style="color:#d32f2f; font-weight:bold; text-align:center;">'${sido}' 지역 전체 검색</div>`;
             dropdown.appendChild(megaScanDiv);
         }
 
-        // 2. 🚀 '전체 마커 표시하기' 버튼 완전히 제거 (해당 로직 삭제)
-
-        // 3. 상호명 앞 건물(🏢) 이모티콘 및 주소 앞 핀(📍) 이모티콘 제거
         placesResult.forEach(place => {
             const div = document.createElement('div'); div.className = 'dropdown-item';
             div.innerHTML = `
@@ -798,16 +769,13 @@ let debounceTimer;
         const results = await Promise.all(fetchPromises);
         results.forEach(res => allPlaces.push(...res));
 
-        // 🚨 [핵심 추가] 카카오가 외곽 지역(소정면 등) 검색 시 옆동네(천안/아산)에서 끌고 온 데이터 거르기
         const validPrefixes = SIDO_PREFIX_MAP[sido] || [sido];
         let filteredPlaces = allPlaces.filter(p => {
             let addr = p.road_address_name || p.address_name || "";
-            // 주소에 '세종' 등 선택한 시/도 명칭이 반드시 포함되어 있는 경우만 통과
             return validPrefixes.some(prefix => addr.includes(prefix));
         });
 
         const uniquePlaces = new Map();
-        // 필터링된 안전한 데이터만 가지고 중복 제거 진행
         filteredPlaces.forEach(p => { 
             const addr = p.road_address_name || p.address_name; 
             if (addr && !uniquePlaces.has(addr)) uniquePlaces.set(addr, p); 
@@ -855,14 +823,12 @@ let debounceTimer;
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
             });
 
-           if (filteredItems.length === 0) { hideLoadingMsg(); alert(`검색 결과가 존재하지 않습니다.`); return; }
+            if (filteredItems.length === 0) { hideLoadingMsg(); alert(`검색 결과가 존재하지 않습니다.`); return; }
 
-            // 🚨 수정 전: globalGroups = []; 뒤에 숨어있던 hideLoadingMsg(); 를 지웠습니다!
-            lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; 
+            lastQuery = placeName; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; 
             buildGlobalGroups();
 
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
-        // 🚨 수정 전: 이 밑에 있던 finally { document.getElementById('mainLoading').style.display = 'none'; } 통째로 삭제!
     }
 
     async function fetchExactElevator(event, placeName, roadAddress, jibunAddress) {
@@ -874,14 +840,6 @@ let debounceTimer;
             const sido = document.getElementById('sidoSelector').value; 
             const apiSido = FULL_SIDO_MAP[sido] || sido;
             
-            // 🚨 [로그 1] 카카오에서 넘어온 원본 주소 확인
-            console.log(`\n==============================================`);
-            console.log(`🔍 [${placeName}] 주소 정밀 매칭 디버그 모드 🔍`);
-            console.log(`==============================================`);
-            console.log(`[Target 1] 카카오 도로명: "${roadAddress}"`);
-            console.log(`[Target 2] 카카오 지번: "${jibunAddress}"`);
-
-            // DB 통신 함수 호출 (내부 로그 확인)
             let validItems = await fetchElevatorDataByAddressOrBuilding(apiSido, roadAddress, jibunAddress, placeName, currentAbortController.signal);
 
             const uniqueMap = new Map();
@@ -901,13 +859,9 @@ let debounceTimer;
 
             if (filteredItems.length === 0) { 
                 hideLoadingMsg(); 
-                console.warn(`❌ [최종 결과] "${placeName}" 매칭 실패 (0건)`);
                 alert("승객용 승강기가 미설치된 건물입니다."); 
                 return; 
             }
-
-            console.log(`✅ [최종 결과] "${placeName}" 매칭 성공 (${filteredItems.length}대)`);
-            console.log(`==============================================\n`);
 
             lastQuery = placeName; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; 
             buildGlobalGroups();
@@ -923,7 +877,7 @@ let debounceTimer;
         if (query === '') { alert("검색어를 입력해주세요."); return; }
         closeDropdown(); closeBottomSheet(); cancelSearch(); currentAbortController = new AbortController();
         
-        saveRecentSearch(sido, query); showLoadingMsg("⏳ 자산 DB 초고속 정밀 스캔 중...");
+        saveRecentSearch(sido, query); showLoadingMsg("⏳ 승강기 정보 조회중...");
         const apiSido = FULL_SIDO_MAP[sido] || sido;
         const queryNoSpace = query.replace(/\s+/g, '').toLowerCase(); 
 
@@ -933,14 +887,12 @@ let debounceTimer;
             
             try {
                 if (searchType === 'building') {
-                    // 🚨 [개선] 전국 단위로 500건을 무조건 가져오던 방식에서, 선택 지역 조건(building_address)을 쿼리에 추가하여 타지역 유출 방지
                     let queryBuilder = supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`);
                     if (sido && sido !== "전국") {
                         let shortSido = sido.substring(0, 2);
                         queryBuilder = queryBuilder.ilike('building_address', `%${shortSido}%`);
                     }
                     const { data, error } = await queryBuilder.limit(500);
-                    if (error) console.warn("Supabase 에러 방어:", error);
                     if (data) dbItems = data;
                 } else {
                     const rParams = extractAddressParams(query);
@@ -958,19 +910,16 @@ let debounceTimer;
                     }
 
                     const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(500);
-                    if (error) console.warn("Supabase 에러 방어:", error);
                     if (data) dbItems = data;
                 }
-            } catch (supaErr) { console.warn("Supabase 통신 예외:", supaErr); }
+            } catch (supaErr) {}
 
             if (dbItems.length > 0) {
                 validItems = dbItems.filter(item => {
                     if (searchType === 'building') {
-                        // 1. 건물명 매칭 확인
                         let nameMatch = String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
                         if (!nameMatch) return false;
                         
-                        // 🚨 2. [핵심 추가] 건물명 필터링 단계에서도 지역(시/도) 첫 단어를 엄격하게 체크
                         if (sido && sido !== "전국") {
                             let shortSido = sido.substring(0, 2);
                             let originalAddr = String(item.building_address || item.address1 || item.address || "");
@@ -987,7 +936,7 @@ let debounceTimer;
             }
 
             if (validItems.length === 0) {
-                showLoadingMsg("⏳ 공공데이터 백업 서버 연결 중...");
+                showLoadingMsg("⏳ 공공데이터 서버 연동 중...");
                 let items = await requestPublicElevatorList(apiSido, query, currentAbortController.signal, searchType);
                 
                 validItems = items.filter(item => {
@@ -995,7 +944,6 @@ let debounceTimer;
                         let nameMatch = String(item.buldNm || item.buld_nm || "").replace(/\s+/g, '').toLowerCase().includes(queryNoSpace);
                         if (!nameMatch) return false;
                         
-                        // 🚨 공공데이터 Fallback 결과물에도 시/도 지역 필터링 동일하게 적용
                         if (sido && sido !== "전국") {
                             let shortSido = sido.substring(0, 2);
                             let originalAddr = String(item.building_address || item.address1 || item.address || "");
@@ -1022,14 +970,10 @@ let debounceTimer;
 
             if (filteredItems.length === 0) { hideLoadingMsg(); alert(`검색 결과가 존재하지 않습니다.`); return; }
 
-            lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
+            lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = [];
             buildGlobalGroups();
 
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
-        finally {
-        // 🚨 2. 데이터 처리가 끝난 직후(성공/실패 무관): 로딩 화면 끄기
-        document.getElementById('mainLoading').style.display = 'none';
-    }
     }
 
     function buildGlobalGroups() {
@@ -1078,7 +1022,6 @@ let debounceTimer;
 
             const safeElevatorNo = String(apiItem.elevatorNo || apiItem.elevator_no || "").trim().padStart(7, '0') || "미상";
 
-            // 💡 [과제 6, 10 복구] 날짜 오염 데이터 (01월03일, 1월 1일) 정규화
             let cleanInstallPlace = String(apiItem.installationPlace || apiItem.installation_place || "-").trim();
             cleanInstallPlace = cleanInstallPlace.replace(/0?(\d+)\s*월\s*0?(\d+)\s*일?/g, '$1-$2');
 
@@ -1107,19 +1050,12 @@ let debounceTimer;
                         group.lat = parseFloat(result[0].y);
                         group.lng = parseFloat(result[0].x);
                     } else {
-                        // 주소를 못 찾으면 임의로 대전 근처로 배정
                         group.lat = 36.3504 + (Math.random() - 0.5) * 0.05;
                         group.lng = 127.3845 + (Math.random() - 0.5) * 0.05;
                     }
-                    // 🚨 핵심: 좌표를 캐시에 저장하고, 다음 작업(지도 그리기)으로 넘어가라고 신호(resolve)를 줌
                     geocodeCache.set(group.address, {lat: group.lat, lng: group.lng});
                     resolve();
                 });
-                geocoder.addressSearch(cleanAddress, function(result, status) {
-    if (status === kakao.maps.services.Status.OK) {
-        // 마커 생성 로직...
-    }
-});
             });
         })).then(() => { renderData(); });
     }
@@ -1145,7 +1081,6 @@ let debounceTimer;
             
             const content = document.createElement('div');
             
-            // 🚨 해당 건물의 모든 승강기가 운행 정지(false)인지 확인
             const isAllStopped = group.elevators.length > 0 && group.elevators.every(elv => !elv.isOperating);
 
             if (group.noElevator) {
@@ -1155,7 +1090,6 @@ let debounceTimer;
                 content.className = 'custom-marker dummy';
                 content.innerHTML = `<span>${group.buildingName}</span><span style="background:#eee; color:#777; padding:1px 4px; border-radius:4px; margin-left:4px; font-size:10.5px;">스캔대기</span>`;
             } else {
-                // 🚨 모두 정지 상태면 빨간색 라벨(stopped) 적용
                 content.className = isAllStopped ? 'custom-marker stopped' : 'custom-marker';
                 content.innerHTML = `<span>${group.buildingName} (${group.elevators.length}대)</span>`;
             }
@@ -1191,72 +1125,10 @@ let debounceTimer;
             } 
         }
         
-        // 🚨 [추가] 지도를 다 그리고 나서 마지막에 로딩창을 끕니다!
+        // 지도를 완전히 다 그리고 나서 로딩화면 끄기
         hideLoadingMsg();
-    } // <- renderData 함수 끝나는 곳
-// 💡 [복구] 지워졌던 DB 및 공공데이터 통신 함수 다시 채워넣기
-    async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
-        showLoadingMsg(`⏳ Supabase 자산 DB에서 정밀 매핑 정보 조회 중...`);
-        try {
-            // 🚨 [로그 2] 주소 자르기 결과 확인
-            const rParams = extractAddressParams(roadAddr);
-            console.log(`[Parse] extractAddressParams 결과:`, rParams);
+    } 
 
-            // 기존의 헐거운 검색 패턴 (예: %성내로%32%)
-            let rSearchPattern = rParams.searchKeyword ? `%${rParams.searchKeyword}%` : "";
-            if (rParams.searchKeyword && rParams.address2) {
-                let mainNum = rParams.address2.split('-')[0].replace(/[^0-9]/g, ''); 
-                rSearchPattern = `%${rParams.searchKeyword}%${mainNum}%`;
-            }
-
-            console.log(`[Query] Supabase ilike 패턴: "${rSearchPattern}"`);
-
-            if (rSearchPattern) {
-                const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(200); 
-                
-                if (error) console.error("[Query Error] Supabase 에러:", error);
-                
-                if (data && data.length > 0) {
-                    console.log(`[DB Result] DB 매칭 건수: ${data.length}건 (원본)`);
-                    
-                    // 첫 3건의 DB 주소값만 샘플로 출력해서 카카오 주소와 비교
-                    console.log(`[DB Sample] 매칭된 DB 주소 샘플:`);
-                    data.slice(0, 3).forEach((d, idx) => {
-                        console.log(`  - Sample ${idx + 1}: "${d.building_address}"`);
-                    });
-
-                    // 🚨 [로그 3] 필터링 검문소 통과 결과 확인
-                    let validDbItems = filterValidElevators(data, null, rParams.searchKeyword, rParams.address2, null, null, apiSido);
-                    console.log(`[Filter] filterValidElevators 통과 건수: ${validDbItems.length}건`);
-                    
-                    if (validDbItems.length > 0) return validDbItems;
-                } else {
-                    console.warn(`[DB Result] DB에서 매칭된 데이터 없음 (0건)`);
-                }
-            }
-        } catch (e) { console.error("Supabase 예외:", e.message); }
-
-        console.log(`⚠️ DB 검색 실패. 공공데이터 API(Fallback)로 우회합니다.`);
-        
-        const rParamsFallback = extractAddressParams(roadAddr);
-        let combinedItems = [];
-        if (rParamsFallback.searchKeyword) {
-            let url = API_CONFIG.BASE_URL + `?serviceKey=${API_CONFIG.SERVICE_KEY}&numOfRows=500`;
-            if (apiSido && apiSido !== "전국") url += `&sido=${encodeURIComponent(apiSido)}`;
-            url += `&address1=${encodeURIComponent(rParamsFallback.searchKeyword + (rParamsFallback.address2 ? " " + rParamsFallback.address2 : ""))}&_type=json`;
-            
-            try {
-                let res = await fetch(DEPLOY_CONFIG.CLOUDFLARE_WORKER_URL + encodeURIComponent(url), { signal });
-                if(res.ok) {
-                    let data = await res.json();
-                    let items = data.response?.body?.items?.item || [];
-                    combinedItems = Array.isArray(items) ? items : [items];
-                }
-            } catch(e) {}
-        }
-        return filterValidElevators(combinedItems, null, rParamsFallback.searchKeyword, rParamsFallback.address2, null, null, apiSido);
-    }
-   // 1. 💡 껍데기 채우기 함수 (상세 제원 파싱 로직 복구)
     async function hydrateDummyGroup(group, signal) {
         const sido = document.getElementById('sidoSelector').value; 
         const apiSido = FULL_SIDO_MAP[sido] || sido;
@@ -1281,7 +1153,6 @@ let debounceTimer;
 
         group.elevators = elevs.map(apiItem => {
             const stts = String(apiItem.elvtr_stts_nm || apiItem.elvtrSttsNm || apiItem.elvtrStts || "상태불명").trim();
-            // PRO #4: 검사연기, 폐지 등도 운행정지(false)로 인식하도록 조건 강화
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('연기') || stts.includes('폐지') || stts.includes('확인불가'));
             
             const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); 
@@ -1323,13 +1194,11 @@ let debounceTimer;
         group.isDummy = false; 
         if (group.elevators.length === 0) group.noElevator = true;
     }
-    // 2. 💡 [수정] 바텀시트 열기 함수 (더미 검사 로직 추가)
-    // 2. 💡 바텀시트 UI 그리기 (사라진 테이블 태그 복구)
+
     async function openBottomSheet(groupData) {
         document.getElementById('resBuildingName').innerText = groupData.buildingName;
         document.getElementById('resAddress').innerText = groupData.address;
         
-        // 🚨 범인 체포: 누락되었던 로드뷰 및 길찾기 외부 링크 동적 매핑 로직 복구
         document.getElementById('btnRoadview').href = `https://map.kakao.com/link/roadview/${groupData.lat},${groupData.lng}`;
         document.getElementById('btnDirections').href = `https://map.kakao.com/link/to/${encodeURIComponent(groupData.buildingName)},${groupData.lat},${groupData.lng}`;
         
@@ -1395,7 +1264,6 @@ let debounceTimer;
         kakao.maps.load(function() { 
             initMap(); 
             
-            // 🚨 [추가] 입력창 실시간 타이핑 감지 리스너 바인딩 (디바운스 적용)
             const inputEl = document.getElementById('searchInput');
             if (inputEl) {
                 inputEl.addEventListener('input', function() {
