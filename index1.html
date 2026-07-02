@@ -271,7 +271,6 @@ let debounceTimer;
         if (searchType === 'place') {
             let searchQuery = query;
 
-            // 초성 입력 시 카카오는 검색을 못 하므로, 프랜차이즈 사전 변환 편법 사용
             if (isChosung) {
                 const dict = {
                     'ㅅㅌㅂㅅ': '스타벅스', 'ㅂㄱㅋ': '버거킹', 'ㅁㄷㄴㄷ': '맥도날드',
@@ -282,16 +281,23 @@ let debounceTimer;
                 };
                 const cleanQuery = query.replace(/\s+/g, '');
                 
-                if (dict[cleanQuery]) {
-                    searchQuery = dict[cleanQuery]; // ㅂㄱㅋ -> 버거킹으로 치환
+                let matchedKeyword = null;
+                // 🚨 핵심 수정: 정확히 일치하지 않아도, 입력한 초성으로 '시작'하는 단어가 사전에 있으면 바로 채택!
+                for (const [key, value] of Object.entries(dict)) {
+                    if (key.startsWith(cleanQuery)) {
+                        matchedKeyword = value;
+                        break;
+                    }
+                }
+                
+                if (matchedKeyword) {
+                    searchQuery = matchedKeyword; // 예: 'ㅅㅌ'만 쳐도 '스타벅스'로 검색 수행
                 } else {
-                    // 사전에 없는 초성은 카카오가 찾지 못하므로 추천창 닫기
                     dropdown.style.display = 'none';
                     return; 
                 }
             }
 
-            // 카카오 장소 검색 실행
             const ps = new kakao.maps.services.Places();
             let keyword = (sido && sido !== "전국") ? `${sido} ${searchQuery}` : searchQuery;
             
@@ -315,7 +321,7 @@ let debounceTimer;
                     dropdown.style.display = 'none';
                 }
             });
-            return; // 상호명 로직은 여기서 종료
+            return; 
         }
 
         // ==========================================
