@@ -258,43 +258,52 @@ let debounceTimer;
         const query = document.getElementById('searchInput').value.trim();
         const dropdown = document.getElementById('searchDropdown');
         
-        // 입력어가 없으면 기존 최근 검색어창을 보여주고 종료
         if (!query) { renderRecentSearches(); return; }
 
         const searchType = document.getElementById('searchType').value;
         const sido = document.getElementById('sidoSelector').value;
-        const apiSido = FULL_SIDO_MAP[sido] || sido;
 
-        // 🚨 PRO 기능: 자음 입력 시 Postgres 정규식 범위로 치환하는 매핑 테이블
+        // 초성 및 겹받침 매핑 테이블
         const chosungMap = {
             'ㄱ': '[가-깋]', 'ㄲ': '[까-낗]', 'ㄴ': '[나-닣]', 'ㄷ': '[다-딯]', 'ㄸ': '[따-띻]',
             'ㄹ': '[라-릫]', 'ㅁ': '[마-믷]', 'ㅂ': '[바-빟]', 'ㅃ': '[빠-삫]', 'ㅅ': '[사-싷]',
             'ㅆ': '[싸-앃]', 'ㅇ': '[아-잏]', 'ㅈ': '[자-짛]', 'ㅉ': '[짜-찧]', 'ㅊ': '[차-칳]',
-            'ㅋ': '[카-킿]', 'ㅌ': '[타-틯]', 'ㅍ': '[파-핗]', 'ㅎ': '[하-힣]'
+            'ㅋ': '[카-킿]', 'ㅌ': '[타-틯]', 'ㅍ': '[파-핗]', 'ㅎ': '[하-힣]',
+            // 🚨 키보드 연속 입력 시 자동으로 합쳐지는 겹자음 완벽 대응 (ㅅㅌㅄ -> ㅅ ㅌ ㅂ ㅅ)
+            'ㄳ': '[가-깋][사-싷]', 'ㄵ': '[나-닣][자-짛]', 'ㄶ': '[나-닣][하-힣]', 
+            'ㄺ': '[라-릫][가-깋]', 'ㄻ': '[라-릫][마-믷]', 'ㄼ': '[라-릫][바-빟]', 
+            'ㄽ': '[라-릫][사-싷]', 'ㄾ': '[라-릫][타-틯]', 'ㄿ': '[라-릫][파-핗]', 
+            'ㅀ': '[라-릫][하-힣]', 'ㅄ': '[바-빟][사-싷]'
         };
         
         let pattern = "";
+        const specialChars = /[.*+?^${}()|[\]\\]/g;
         for (let char of query) {
-            pattern += chosungMap[char] || char;
+            if (chosungMap[char]) {
+                pattern += chosungMap[char];
+            } else {
+                // 🚨 괄호 등 일반 텍스트 입력 시 정규식 에러가 나지 않도록 보호
+                pattern += char.replace(specialChars, '\\$&'); 
+            }
         }
 
         try {
             let q = supabaseClient.from('elevators_raw').select('buld_nm, building_address');
             
-            // 관내 지역 선택 시 타지역 데이터 자동완성 제외
             if (sido && sido !== "전국") {
                 let shortSido = sido.substring(0, 2);
                 q = q.ilike('building_address', `%${shortSido}%`);
             }
 
-            // 검색 유형에 따라 매칭 컬럼 분기 (imatch로 정규식 초성 검색 수행)
+            // 🚨 해결: .imatch() 직접 호출이 아닌 .filter('컬럼', 'imatch', '패턴')으로 쿼리 문법 수정
             if (searchType === 'building' || searchType === 'place') {
-                q = q.imatch('buld_nm', pattern);
+                q = q.filter('buld_nm', 'imatch', pattern);
             } else if (searchType === 'address') {
-                q = q.imatch('building_address', pattern);
+                q = q.filter('building_address', 'imatch', pattern);
             }
 
             const { data, error } = await q.limit(15);
+            
             if (error) { console.warn("자동완성 쿼리 실패:", error); return; }
 
             dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 검색어</div>`;
@@ -302,7 +311,6 @@ let debounceTimer;
             if (!data || data.length === 0) {
                 dropdown.innerHTML += `<div class="dropdown-item" style="color:#999; font-size:13px; text-align:center; padding:15px 0;">추천 결과가 없습니다.</div>`;
             } else {
-                // 건물명 + 주소 조합 중복 제거
                 const seen = new Set();
                 const uniqueData = data.filter(item => {
                     const k = `${item.buld_nm}_${item.building_address}`;
@@ -312,9 +320,8 @@ let debounceTimer;
                 uniqueData.forEach(item => {
                     const div = document.createElement('div');
                     div.className = 'dropdown-item';
-                    // 자동완성 리스트 하이라이트 및 클릭 이벤트 바인딩
                     div.innerHTML = `
-                        <div class="item-text" onmousedown="selectAutocomplete('${item.buld_nm.replace(/'/g, "\\'")}', '${item.building_address.replace(/'/g, "\\'")}')">
+                        <div class="item-text" onmousedown="selectAutocomplete('${item.buld_nm.replace(/'/g, "\\'")}', '${item.building_address.replace(/'/g, "\\'")}')" ontouchstart="selectAutocomplete('${item.buld_nm.replace(/'/g, "\\'")}', '${item.building_address.replace(/'/g, "\\'")}')">
                             <span style="font-weight:bold; color:#1e4e79;">🏢 ${item.buld_nm}</span>
                             <span style="font-size:11px; color:#666;">${item.building_address}</span>
                         </div>
