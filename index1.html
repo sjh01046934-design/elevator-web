@@ -281,18 +281,20 @@ let debounceTimer;
             'ㅄ': '[\uBC14-\uBE5F]\\s*[\uC0AC-\uC2F7]'
         };
         
-        let pattern = "";
+        let parts = [];
         const specialChars = /[.*+?^${}()|[\]\\]/g;
         for (let char of query) {
             if (chosungMap[char]) {
-                // 🚨 띄어쓰기 허용: DB에 '한누리 대로 25'처럼 공백이 있어도 무시하고 매칭되도록 \s* 를 추가
-                pattern += chosungMap[char] + "\\s*";
+                parts.push(chosungMap[char]);
             } else if (doubleMap[char]) {
-                pattern += doubleMap[char] + "\\s*";
+                parts.push(doubleMap[char]);
             } else {
-                pattern += char.replace(specialChars, '\\$&') + "\\s*"; 
+                parts.push(char.replace(specialChars, '\\$&')); 
             }
         }
+        
+        // 🚨 무제한 공백(\s*) 대신 안전한 0~1개 공백(\s?) 배열 조인 방식 적용
+        let pattern = parts.join("\\s?");
 
         try {
             let q = supabaseClient.from('elevators_raw').select('buld_nm, building_address');
