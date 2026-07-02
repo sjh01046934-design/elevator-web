@@ -259,31 +259,79 @@ let debounceTimer;
         const dropdown = document.getElementById('searchDropdown');
         
         if (!query) { renderRecentSearches(); return; }
-        
-        // 🚨 1글자는 무조건 차단하여 DB 과부하(500 에러) 원천 봉쇄
-        if (query.length < 2) { 
-            dropdown.style.display = 'none'; 
-            return; 
-        }
+        if (query.length < 2) { dropdown.style.display = 'none'; return; }
 
         const searchType = document.getElementById('searchType').value;
         const sido = document.getElementById('sidoSelector').value;
+        const isChosung = /^[ㄱ-ㅎ\s]+$/.test(query);
 
-        // 한글 유니코드 매핑 (인코딩 깨짐 방지)
+        // ==========================================
+        // 🚀 1. 상호명 검색일 경우 -> 카카오 API 호출
+        // ==========================================
+        if (searchType === 'place') {
+            let searchQuery = query;
+
+            // 초성 입력 시 카카오는 검색을 못 하므로, 프랜차이즈 사전 변환 편법 사용
+            if (isChosung) {
+                const dict = {
+                    'ㅅㅌㅂㅅ': '스타벅스', 'ㅂㄱㅋ': '버거킹', 'ㅁㄷㄴㄷ': '맥도날드',
+                    'ㅇㄷㅇ': '이디야', 'ㅌㅅㅍㄹㅅ': '투썸플레이스', 'ㅍㅂㄱㅌ': '파리바게뜨',
+                    'ㄷㅇㅅ': '다이소', 'ㅇㄹㅂㅇ': '올리브영', 'ㅂㅅㅋㄹㅂㅅ': '배스킨라빈스',
+                    'ㄹㄷㄹㅇ': '롯데리아', 'ㅎㅍㄹㅅ': '홈플러스', 'ㅇㅁㅌ': '이마트',
+                    'ㅋㅍㅂ': '커피빈', 'ㅁㄱㅋㅍ': '메가커피', 'ㅃㄷㅂ': '빽다방'
+                };
+                const cleanQuery = query.replace(/\s+/g, '');
+                
+                if (dict[cleanQuery]) {
+                    searchQuery = dict[cleanQuery]; // ㅂㄱㅋ -> 버거킹으로 치환
+                } else {
+                    // 사전에 없는 초성은 카카오가 찾지 못하므로 추천창 닫기
+                    dropdown.style.display = 'none';
+                    return; 
+                }
+            }
+
+            // 카카오 장소 검색 실행
+            const ps = new kakao.maps.services.Places();
+            let keyword = (sido && sido !== "전국") ? `${sido} ${searchQuery}` : searchQuery;
+            
+            ps.keywordSearch(keyword, function(data, status) {
+                if (status === kakao.maps.services.Status.OK) {
+                    dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 상호명 (카카오 연동)</div>`;
+                    
+                    data.slice(0, 10).forEach(item => {
+                        const div = document.createElement('div');
+                        div.className = 'dropdown-item';
+                        div.innerHTML = `
+                            <div class="item-text" onmousedown="selectAutocomplete('${item.place_name.replace(/'/g, "\\'")}', '${item.road_address_name || item.address_name}')" ontouchstart="selectAutocomplete('${item.place_name.replace(/'/g, "\\'")}', '${item.road_address_name || item.address_name}')">
+                                <span style="font-weight:bold; color:#1e4e79;">🏪 ${item.place_name}</span>
+                                <span style="font-size:11px; color:#666;">${item.road_address_name || item.address_name}</span>
+                            </div>
+                        `;
+                        dropdown.appendChild(div);
+                    });
+                    dropdown.style.display = 'block';
+                } else {
+                    dropdown.style.display = 'none';
+                }
+            });
+            return; // 상호명 로직은 여기서 종료
+        }
+
+        // ==========================================
+        // 🚀 2. 건물명 / 도로명 검색일 경우 -> Supabase 초성 검색
+        // ==========================================
         const chosungMap = {
             'ㄱ': '[\uAC00-\uAE4B]', 'ㄲ': '[\uAE4C-\uB097]', 'ㄴ': '[\uB098-\uB2E3]', 'ㄷ': '[\uB2E4-\uB52F]', 'ㄸ': '[\uB530-\uB77B]',
             'ㄹ': '[\uB77C-\uB9C7]', 'ㅁ': '[\uB9C8-\uBC13]', 'ㅂ': '[\uBC14-\uBE5F]', 'ㅃ': '[\uBE60-\uC0AB]', 'ㅅ': '[\uC0AC-\uC2F7]',
             'ㅆ': '[\uC2F8-\uC543]', 'ㅇ': '[\uC544-\uC78F]', 'ㅈ': '[\uC790-\uC9DB]', 'ㅉ': '[\uC9DC-\uCC27]', 'ㅊ': '[\uCC28-\uCE73]',
             'ㅋ': '[\uCE74-\uD0BF]', 'ㅌ': '[\uD0C0-\uD30B]', 'ㅍ': '[\uD30C-\uD557]', 'ㅎ': '[\uD558-\uD7A3]'
         };
-        
         const doubleMap = {
-            'ㄳ': '[\uAC00-\uAE4B][\uC0AC-\uC2F7]', 'ㄵ': '[\uB098-\uB2E3][\uC790-\uC9DB]', 
-            'ㄶ': '[\uB098-\uB2E3][\uD558-\uD7A3]', 'ㄺ': '[\uB77C-\uB9C7][\uAC00-\uAE4B]', 
-            'ㄻ': '[\uB77C-\uB9C7][\uB9C8-\uBC13]', 'ㄼ': '[\uB77C-\uB9C7][\uBC14-\uBE5F]', 
-            'ㄽ': '[\uB77C-\uB9C7][\uC0AC-\uC2F7]', 'ㄾ': '[\uB77C-\uB9C7][\uD0C0-\uD30B]', 
-            'ㄿ': '[\uB77C-\uB9C7][\uD30C-\uD557]', 'ㅀ': '[\uB77C-\uB9C7][\uD558-\uD7A3]', 
-            'ㅄ': '[\uBC14-\uBE5F][\uC0AC-\uC2F7]'
+            'ㄳ': '[\uAC00-\uAE4B][\uC0AC-\uC2F7]', 'ㄵ': '[\uB098-\uB2E3][\uC790-\uC9DB]', 'ㄶ': '[\uB098-\uB2E3][\uD558-\uD7A3]', 
+            'ㄺ': '[\uB77C-\uB9C7][\uAC00-\uAE4B]', 'ㄻ': '[\uB77C-\uB9C7][\uB9C8-\uBC13]', 'ㄼ': '[\uB77C-\uB9C7][\uBC14-\uBE5F]', 
+            'ㄽ': '[\uB77C-\uB9C7][\uC0AC-\uC2F7]', 'ㄾ': '[\uB77C-\uB9C7][\uD0C0-\uD30B]', 'ㄿ': '[\uB77C-\uB9C7][\uD30C-\uD557]', 
+            'ㅀ': '[\uB77C-\uB9C7][\uD558-\uD7A3]', 'ㅄ': '[\uBC14-\uBE5F][\uC0AC-\uC2F7]'
         };
         
         let patternParts = [];
@@ -294,30 +342,26 @@ let debounceTimer;
             else patternParts.push(char.replace(specialChars, '\\$&')); 
         }
 
-        // 🚨 무제한 공백(\s*) 정규식을 제거하고, 그냥 글자들이 붙어있다고 가정(조인)하여 연산량 폭발 방지
-        // 띄어쓰기가 많은 도로명 검색을 위해 선택적으로 빈칸 하나(\s?) 정도만 허용
         let pattern = patternParts.join("\\s?");
 
         try {
             let q = supabaseClient.from('elevators_raw').select('buld_nm, building_address');
             
-            // 🚨 지역(시/도)이 선택되어 있다면 쿼리 범위를 전국 80만 개에서 해당 지역 몇 만 개로 대폭 축소 (속도 향상 핵심)
             if (sido && sido !== "전국") {
                 let shortSido = sido.substring(0, 2);
-                q = q.ilike('building_address', `%${shortSido}%`);
+                q = q.ilike('building_address', `${shortSido}%`);
             }
 
-            if (searchType === 'building' || searchType === 'place') {
+            if (searchType === 'building') {
                 q = q.filter('buld_nm', 'imatch', pattern);
             } else if (searchType === 'address') {
                 q = q.filter('building_address', 'imatch', pattern);
             }
 
             const { data, error } = await q.limit(15);
-            
-            if (error) { console.warn("자동완성 에러:", error); return; }
+            if (error) return;
 
-            dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 검색어</div>`;
+            dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 ${searchType === 'building' ? '건물명' : '도로명'}</div>`;
 
             if (!data || data.length === 0) {
                 dropdown.innerHTML += `<div class="dropdown-item" style="color:#999; font-size:13px; text-align:center; padding:15px 0;">추천 결과가 없습니다.</div>`;
@@ -346,7 +390,7 @@ let debounceTimer;
             }
             dropdown.style.display = 'block';
         } catch (e) {
-            console.error("자동완성 시스템 예외:", e);
+            console.error("자동완성 예외:", e);
         }
     }
 
