@@ -1095,7 +1095,7 @@ let debounceTimer;
                 }
                 
                 await new Promise(res => setTimeout(res, index * 100)); 
-                let cleanAddress = item.building_address.replace(/외\s*\d+필지/g, '').trim();
+                let cleanAddress = group.address.replace(/외\s*\d+필지/g, '').trim();
                 geocoder.addressSearch(cleanAddress, function(result, status) {
     if (status === kakao.maps.services.Status.OK) {
         // 마커 생성 로직...
