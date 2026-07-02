@@ -263,13 +263,11 @@ let debounceTimer;
         const searchType = document.getElementById('searchType').value;
         const sido = document.getElementById('sidoSelector').value;
 
-        // 초성 및 겹받침 매핑 테이블
         const chosungMap = {
             'ㄱ': '[가-깋]', 'ㄲ': '[까-낗]', 'ㄴ': '[나-닣]', 'ㄷ': '[다-딯]', 'ㄸ': '[따-띻]',
             'ㄹ': '[라-릫]', 'ㅁ': '[마-믷]', 'ㅂ': '[바-빟]', 'ㅃ': '[빠-삫]', 'ㅅ': '[사-싷]',
             'ㅆ': '[싸-앃]', 'ㅇ': '[아-잏]', 'ㅈ': '[자-짛]', 'ㅉ': '[짜-찧]', 'ㅊ': '[차-칳]',
             'ㅋ': '[카-킿]', 'ㅌ': '[타-틯]', 'ㅍ': '[파-핗]', 'ㅎ': '[하-힣]',
-            // 🚨 키보드 연속 입력 시 자동으로 합쳐지는 겹자음 완벽 대응 (ㅅㅌㅄ -> ㅅ ㅌ ㅂ ㅅ)
             'ㄳ': '[가-깋][사-싷]', 'ㄵ': '[나-닣][자-짛]', 'ㄶ': '[나-닣][하-힣]', 
             'ㄺ': '[라-릫][가-깋]', 'ㄻ': '[라-릫][마-믷]', 'ㄼ': '[라-릫][바-빟]', 
             'ㄽ': '[라-릫][사-싷]', 'ㄾ': '[라-릫][타-틯]', 'ㄿ': '[라-릫][파-핗]', 
@@ -282,7 +280,6 @@ let debounceTimer;
             if (chosungMap[char]) {
                 pattern += chosungMap[char];
             } else {
-                // 🚨 괄호 등 일반 텍스트 입력 시 정규식 에러가 나지 않도록 보호
                 pattern += char.replace(specialChars, '\\$&'); 
             }
         }
@@ -295,7 +292,6 @@ let debounceTimer;
                 q = q.ilike('building_address', `%${shortSido}%`);
             }
 
-            // 🚨 해결: .imatch() 직접 호출이 아닌 .filter('컬럼', 'imatch', '패턴')으로 쿼리 문법 수정
             if (searchType === 'building' || searchType === 'place') {
                 q = q.filter('buld_nm', 'imatch', pattern);
             } else if (searchType === 'address') {
@@ -303,8 +299,7 @@ let debounceTimer;
             }
 
             const { data, error } = await q.limit(15);
-            
-            if (error) { console.warn("자동완성 쿼리 실패:", error); return; }
+            if (error) return;
 
             dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 검색어</div>`;
 
@@ -320,10 +315,15 @@ let debounceTimer;
                 uniqueData.forEach(item => {
                     const div = document.createElement('div');
                     div.className = 'dropdown-item';
+                    
+                    // 🚨 핵심 포인트: 도로명 검색일 때는 주소를 파란색 굵은 글씨로 위로 올림
+                    let primaryText = searchType === 'address' ? `📍 ${item.building_address}` : `🏢 ${item.buld_nm}`;
+                    let secondaryText = searchType === 'address' ? `🏢 ${item.buld_nm}` : `📍 ${item.building_address}`;
+
                     div.innerHTML = `
                         <div class="item-text" onmousedown="selectAutocomplete('${item.buld_nm.replace(/'/g, "\\'")}', '${item.building_address.replace(/'/g, "\\'")}')" ontouchstart="selectAutocomplete('${item.buld_nm.replace(/'/g, "\\'")}', '${item.building_address.replace(/'/g, "\\'")}')">
-                            <span style="font-weight:bold; color:#1e4e79;">🏢 ${item.buld_nm}</span>
-                            <span style="font-size:11px; color:#666;">${item.building_address}</span>
+                            <span style="font-weight:bold; color:#1e4e79;">${primaryText}</span>
+                            <span style="font-size:11px; color:#666;">${secondaryText}</span>
                         </div>
                     `;
                     dropdown.appendChild(div);
@@ -337,14 +337,21 @@ let debounceTimer;
 
     // 💡 [신규] 추천 검색어 클릭 시 입력창을 채우고 즉시 정밀 조회를 실행하는 함수
     function selectAutocomplete(buldNm, address) {
-        document.getElementById('searchInput').value = buldNm;
+        const searchType = document.getElementById('searchType').value;
+        
+        // 🚨 핵심 포인트: 도로명 검색 중이었다면 검색창에 '건물명' 대신 완성된 '주소'를 입력
+        if (searchType === 'address') {
+            document.getElementById('searchInput').value = address;
+        } else {
+            document.getElementById('searchInput').value = buldNm;
+        }
+        
         closeDropdown();
         
-        const searchType = document.getElementById('searchType').value;
-        // 상호명/건물명 모드일 경우 카카오 연동 오차 없이 즉시 Supabase 매칭 격하 처리
         if (searchType === 'place' || searchType === 'building') {
             fetchExactElevator(null, buldNm, address, address);
         } else {
+            // 주소가 검색창에 들어간 상태로 초고속 광역 스캔 시작
             executeBroadSearch();
         }
     }
