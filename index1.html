@@ -1097,6 +1097,19 @@ let debounceTimer;
                 await new Promise(res => setTimeout(res, index * 100)); 
                 let cleanAddress = group.address.replace(/외\s*\d+필지/g, '').trim();
                 geocoder.addressSearch(cleanAddress, function(result, status) {
+                    if (status === kakao.maps.services.Status.OK) {
+                        group.lat = parseFloat(result[0].y);
+                        group.lng = parseFloat(result[0].x);
+                    } else {
+                        // 주소를 못 찾으면 임의로 대전 근처로 배정
+                        group.lat = 36.3504 + (Math.random() - 0.5) * 0.05;
+                        group.lng = 127.3845 + (Math.random() - 0.5) * 0.05;
+                    }
+                    // 🚨 핵심: 좌표를 캐시에 저장하고, 다음 작업(지도 그리기)으로 넘어가라고 신호(resolve)를 줌
+                    geocodeCache.set(group.address, {lat: group.lat, lng: group.lng});
+                    resolve();
+                });
+                geocoder.addressSearch(cleanAddress, function(result, status) {
     if (status === kakao.maps.services.Status.OK) {
         // 마커 생성 로직...
     }
