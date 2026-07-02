@@ -540,29 +540,27 @@
         dropdown.innerHTML = `<div class="dropdown-header">정확한 장소를 선택하거나 전체를 스캔하세요👇</div>`;
         const sido = document.getElementById('sidoSelector').value; 
 
+        // 1. [광역스캔] 문구 수정 및 이모티콘 제거
         if (DISTRICT_MAP[sido] && sido !== "전국") {
             const megaScanDiv = document.createElement('div'); megaScanDiv.className = 'dropdown-item';
-            megaScanDiv.innerHTML = `<div class="item-text" onmousedown="executeMegaScan(event, '${sido}', '${keyword}')" ontouchstart="executeMegaScan(event, '${sido}', '${keyword}')" style="color:#d32f2f; font-weight:bold; text-align:center;">🛸 [광역 스캔] '${sido}' 전 지역 탐색</div>`;
+            megaScanDiv.innerHTML = `<div class="item-text" onmousedown="executeMegaScan(event, '${sido}', '${keyword}')" ontouchstart="executeMegaScan(event, '${sido}', '${keyword}')" style="color:#d32f2f; font-weight:bold; text-align:center;">'${sido}' 지역 전체 검색</div>`;
             dropdown.appendChild(megaScanDiv);
         }
 
-        let addressList = [...new Set(placesResult.map(p => p.road_address_name || p.address_name))];
-        const addressStr = JSON.stringify(addressList).replace(/"/g, '&quot;');
+        // 2. 🚀 '전체 마커 표시하기' 버튼 완전히 제거 (해당 로직 삭제)
 
-        const searchAllDiv = document.createElement('div'); searchAllDiv.className = 'dropdown-item';
-        searchAllDiv.innerHTML = `<div class="item-text" onmousedown="executeMultiAddressSearch(event, ${addressStr}, '${keyword}')" ontouchstart="executeMultiAddressSearch(event, ${addressStr}, '${keyword}')" style="color:#1e4e79; font-weight:bold; text-align:center;">🚀 검색된 '${keyword}' 전체 마커 표시하기</div>`;
-        dropdown.appendChild(searchAllDiv);
-
+        // 3. 상호명 앞 건물(🏢) 이모티콘 및 주소 앞 핀(📍) 이모티콘 제거
         placesResult.forEach(place => {
             const div = document.createElement('div'); div.className = 'dropdown-item';
             div.innerHTML = `
                 <div class="item-text" onmousedown="fetchExactElevator(event, '${place.place_name}', '${place.road_address_name || ""}', '${place.address_name || ""}')" ontouchstart="fetchExactElevator(event, '${place.place_name}', '${place.road_address_name || ""}', '${place.address_name || ""}')">
-                    <span style="font-weight:bold; color:#1e4e79;">🏢 ${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
-                    <span style="font-size:11px; color:#666;">📍 ${place.road_address_name || place.address_name}</span>
+                    <span style="font-weight:bold; color:#1e4e79;">${place.place_name.replace(keyword, `<span style="color:#d32f2f;">${keyword}</span>`)}</span>
+                    <span style="font-size:11px; color:#666;">${place.road_address_name || place.address_name}</span>
                 </div>
             `;
             dropdown.appendChild(div);
         });
+        
         dropdown.style.display = 'block';
     }
 
