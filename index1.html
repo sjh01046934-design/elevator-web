@@ -103,7 +103,8 @@
 <div id="mainLoading" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.95); padding: 25px 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 9999; text-align: center; border: 1px solid #eee;">
     <div style="font-size: 30px; margin-bottom: 15px;">⏳</div>
     <div style="color: #1e4e79; font-weight: bold; font-size: 16px; margin-bottom: 8px;">승강기 데이터 조회 중...</div>
-    <div style="color: #666; font-size: 13px;">잠시만 기다려 주세요.</div>
+    <div style="color: #666; font-size: 13px; margin-bottom: 20px;">지도에 표시중입니다. 잠시만 기다려 주세요.</div>
+    <button onclick="cancelSearch()" style="background: #d32f2f; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); width: 100%;">✖ 검색 취소</button>
 </div>
 <div class="app-container">
     <div id="map"></div>
@@ -488,7 +489,10 @@ let debounceTimer;
     }
 
     function showLoadingMsg(text) { document.getElementById('loadingText').innerText = text; document.getElementById('searchLoadingMsg').style.display = 'block'; }
-    function hideLoadingMsg() { document.getElementById('searchLoadingMsg').style.display = 'none'; }
+    function hideLoadingMsg() { 
+    document.getElementById('searchLoadingMsg').style.display = 'none'; 
+    document.getElementById('mainLoading').style.display = 'none'; 
+}
     function cancelSearch() { if (currentAbortController) { currentAbortController.abort(); currentAbortController = null; } hideLoadingMsg(); }
 
     function fastSearch(event, sido, query, type) {
@@ -812,7 +816,7 @@ let debounceTimer;
         
         if (placeArray.length === 0) { hideLoadingMsg(); alert(`검색된 데이터가 없습니다.`); return; }
 
-        lastQuery = keyword; lastSido = sido; globalGroups = []; allElevatorsData = []; clusterer.clear(); hideLoadingMsg();
+        lastQuery = keyword; lastSido = sido; globalGroups = []; allElevatorsData = []; clusterer.clear();
 
         globalGroups = placeArray.map(p => ({
             buildingName: p.place_name, address: p.road_address_name || p.address_name,
@@ -851,12 +855,14 @@ let debounceTimer;
                 return !(type.includes('덤웨이터') || type === '화물용' || (type.includes('화물용') && !type.includes('승객')));
             });
 
-            if (filteredItems.length === 0) { hideLoadingMsg(); alert(`승강기 데이터를 찾을 수 없습니다.`); return; }
+           if (filteredItems.length === 0) { hideLoadingMsg(); alert(`검색 결과가 존재하지 않습니다.`); return; }
 
-            lastQuery = placeName; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
+            // 🚨 수정 전: globalGroups = []; 뒤에 숨어있던 hideLoadingMsg(); 를 지웠습니다!
+            lastQuery = query; lastSido = sido; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; 
             buildGlobalGroups();
 
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("통신 에러"); } }
+        // 🚨 수정 전: 이 밑에 있던 finally { document.getElementById('mainLoading').style.display = 'none'; } 통째로 삭제!
     }
 
     async function fetchExactElevator(event, placeName, roadAddress, jibunAddress) {
@@ -903,7 +909,7 @@ let debounceTimer;
             console.log(`✅ [최종 결과] "${placeName}" 매칭 성공 (${filteredItems.length}대)`);
             console.log(`==============================================\n`);
 
-            lastQuery = placeName; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; hideLoadingMsg();
+            lastQuery = placeName; allElevatorsData = filteredItems; clusterer.clear(); globalGroups = []; 
             buildGlobalGroups();
         } catch (error) { if (error.name !== 'AbortError') { hideLoadingMsg(); alert("서버 통신 에러"); } }
     }
@@ -1184,7 +1190,10 @@ let debounceTimer;
                 setTimeout(() => { map.setBounds(bounds); }, 100);
             } 
         }
-    }
+        
+        // 🚨 [추가] 지도를 다 그리고 나서 마지막에 로딩창을 끕니다!
+        hideLoadingMsg();
+    } // <- renderData 함수 끝나는 곳
 // 💡 [복구] 지워졌던 DB 및 공공데이터 통신 함수 다시 채워넣기
     async function fetchElevatorDataByAddressOrBuilding(apiSido, roadAddr, jibunAddr, placeName, signal) {
         showLoadingMsg(`⏳ Supabase 자산 DB에서 정밀 매핑 정보 조회 중...`);
