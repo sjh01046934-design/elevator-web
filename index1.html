@@ -259,11 +259,19 @@ let debounceTimer;
         const dropdown = document.getElementById('searchDropdown');
         
         if (!query) { renderRecentSearches(); return; }
-        if (query.length < 2) { dropdown.style.display = 'none'; return; }
+        if (query.length < 2) { 
+            dropdown.style.display = 'none'; 
+            console.log(`🟡 [통과] 검색어 1글자('${query}'): 서버 보호를 위해 자동완성 대기`);
+            return; 
+        }
 
         const searchType = document.getElementById('searchType').value;
         const sido = document.getElementById('sidoSelector').value;
         const isChosung = /^[ㄱ-ㅎ\s]+$/.test(query);
+
+        // 🚨 1. 검색 시작 로그 출력
+        console.log(`\n🟢 === [자동완성 검색 시작] ===`);
+        console.log(`👉 입력어: '${query}' | 검색유형: ${searchType} | 지역: ${sido} | 100%초성여부: ${isChosung}`);
 
         // ==========================================
         // 🚀 1. 상호명 검색일 경우 -> 카카오 API 호출
@@ -282,7 +290,6 @@ let debounceTimer;
                 const cleanQuery = query.replace(/\s+/g, '');
                 
                 let matchedKeyword = null;
-                // 🚨 핵심 수정: 정확히 일치하지 않아도, 입력한 초성으로 '시작'하는 단어가 사전에 있으면 바로 채택!
                 for (const [key, value] of Object.entries(dict)) {
                     if (key.startsWith(cleanQuery)) {
                         matchedKeyword = value;
@@ -291,8 +298,10 @@ let debounceTimer;
                 }
                 
                 if (matchedKeyword) {
-                    searchQuery = matchedKeyword; // 예: 'ㅅㅌ'만 쳐도 '스타벅스'로 검색 수행
+                    console.log(`🔵 [사전 매칭 성공] '${cleanQuery}' -> '${matchedKeyword}'(으)로 치환하여 카카오에 요청합니다.`);
+                    searchQuery = matchedKeyword; 
                 } else {
+                    console.log(`🔴 [사전 매칭 실패] '${cleanQuery}'에 해당하는 프랜차이즈가 사전에 없습니다. 검색 중단.`);
                     dropdown.style.display = 'none';
                     return; 
                 }
@@ -300,9 +309,11 @@ let debounceTimer;
 
             const ps = new kakao.maps.services.Places();
             let keyword = (sido && sido !== "전국") ? `${sido} ${searchQuery}` : searchQuery;
+            console.log(`📡 [카카오 API 요청] 최종 검색어: '${keyword}'`);
             
             ps.keywordSearch(keyword, function(data, status) {
                 if (status === kakao.maps.services.Status.OK) {
+                    console.log(`✅ [카카오 응답 성공] ${data.length}건의 장소를 찾았습니다.`);
                     dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 상호명 (카카오 연동)</div>`;
                     
                     data.slice(0, 10).forEach(item => {
@@ -318,6 +329,7 @@ let debounceTimer;
                     });
                     dropdown.style.display = 'block';
                 } else {
+                    console.log(`🔴 [카카오 응답 실패 또는 결과 없음] 상태 코드: ${status}`);
                     dropdown.style.display = 'none';
                 }
             });
@@ -349,6 +361,7 @@ let debounceTimer;
         }
 
         let pattern = patternParts.join("\\s?");
+        console.log(`🟣 [정규식 변환 완료] DB 질의용 패턴: ${pattern}`);
 
         try {
             let q = supabaseClient.from('elevators_raw').select('buld_nm, building_address');
@@ -356,6 +369,7 @@ let debounceTimer;
             if (sido && sido !== "전국") {
                 let shortSido = sido.substring(0, 2);
                 q = q.ilike('building_address', `${shortSido}%`);
+                console.log(`🟣 [DB 필터] 지역 한정 적용: '${shortSido}'로 시작하는 주소`);
             }
 
             if (searchType === 'building') {
@@ -364,8 +378,15 @@ let debounceTimer;
                 q = q.filter('building_address', 'imatch', pattern);
             }
 
+            console.log(`📡 [Supabase 요청 발송] 데이터를 기다리는 중...`);
             const { data, error } = await q.limit(15);
-            if (error) return;
+            
+            if (error) {
+                console.error(`❌ [Supabase 에러 발생]`, error);
+                return;
+            }
+
+            console.log(`✅ [Supabase 응답 성공] ${data.length}건의 데이터를 가져왔습니다.`);
 
             dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 ${searchType === 'building' ? '건물명' : '도로명'}</div>`;
 
@@ -396,7 +417,7 @@ let debounceTimer;
             }
             dropdown.style.display = 'block';
         } catch (e) {
-            console.error("자동완성 예외:", e);
+            console.error("❌ [자동완성 시스템 크래시 예외 발생]:", e);
         }
     }
 
