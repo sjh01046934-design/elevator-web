@@ -634,7 +634,17 @@
             }
 
             if (rSearchPattern) {
-                const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(200); 
+                // 🚨 [핵심] 타임아웃 500 에러 방지를 위해, 지역명(예: 세종)을 패턴 맨 앞에 강제 결합
+                let finalPattern = rSearchPattern;
+                if (apiSido && apiSido !== "전국") {
+                    let shortSido = apiSido.substring(0, 2);
+                    // 예: "%산울2로%10%" -> "세종%산울2로%10%"
+                    finalPattern = finalPattern.startsWith('%') ? `${shortSido}${finalPattern}` : `${shortSido}%${finalPattern}`;
+                }
+
+                console.log(`🟣 [정밀조회] DB 도로명 질의 패턴: ${finalPattern}`);
+
+                const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', finalPattern).limit(200); 
                 
                 if (error) console.error("[Query Error] Supabase 에러:", error);
                 
@@ -908,7 +918,7 @@
                     let queryBuilder = supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`);
                     if (sido && sido !== "전국") {
                         let shortSido = sido.substring(0, 2);
-                        queryBuilder = queryBuilder.ilike('building_address', `%${shortSido}%`);
+                        queryBuilder = queryBuilder.ilike('building_address', `${shortSido}%`);
                     }
                     const { data, error } = await queryBuilder.limit(500);
                     if (data) dbItems = data;
@@ -924,13 +934,28 @@
                     } else if (rParams.searchKeyword) {
                         rSearchPattern = `%${rParams.searchKeyword}%`;
                     } else {
-                        rSearchPattern = `%${query}%`;
+                        // 추출 실패 시 텍스트 정제 후 기본 패턴 생성
+                        let safeQuery = query.replace(/\s+/g, '%');
+                        safeQuery = safeQuery.replace(/([가-힣A-Za-z]+)(\d+)/g, '$1%$2');
+                        safeQuery = safeQuery.replace(/(\d+)([가-힣A-Za-z]+)/g, '$1%$2');
+                        rSearchPattern = `%${safeQuery}%`;
                     }
 
-                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', rSearchPattern).limit(500);
+                    // 🚨 [핵심] 타임아웃 500 에러 방지를 위해, 지역명(sido)을 검색 패턴 맨 앞에 강제로 붙여버립니다!
+                    let finalPattern = rSearchPattern;
+                    if (sido && sido !== "전국") {
+                        let shortSido = sido.substring(0, 2);
+                        // 예: "%산울2로%10%" -> "세종%산울2로%10%"
+                        finalPattern = finalPattern.startsWith('%') ? `${shortSido}${finalPattern}` : `${shortSido}%${finalPattern}`;
+                    }
+
+                    console.log(`🟣 [메인 검색] DB 도로명 질의 패턴: ${finalPattern}`);
+
+                    const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', finalPattern).limit(500);
+                    if (error) console.warn("Supabase 에러 방어:", error);
                     if (data) dbItems = data;
                 }
-            } catch (supaErr) {}
+            } catch (supaErr) { console.warn("Supabase 통신 예외:", supaErr); }
 
             if (dbItems.length > 0) {
                 validItems = dbItems.filter(item => {
