@@ -271,18 +271,12 @@
         if (!query) { renderRecentSearches(); return; }
         if (query.length < 2) { 
             dropdown.style.display = 'none'; 
-            console.log(`🟡 [통과] 검색어 1글자('${query}'): 서버 보호를 위해 자동완성 대기`);
             return; 
         }
 
         const searchType = document.getElementById('searchType').value;
         const sido = document.getElementById('sidoSelector').value;
-        
-        // 🚨 초성이 하나라도 포함되어 있는지 확인 (true/false)
         const hasChosung = /[ㄱ-ㅎ]/.test(query);
-
-        console.log(`\n🟢 === [자동완성 검색 시작] ===`);
-        console.log(`👉 입력어: '${query}' | 검색유형: ${searchType} | 지역: ${sido} | 초성포함여부: ${hasChosung}`);
 
         // ==========================================
         // 🚀 1. 상호명 검색일 경우 -> 카카오 API 호출
@@ -290,7 +284,6 @@
         if (searchType === 'place') {
             let searchQuery = query;
 
-            // 상호명 검색인데 100% 초성으로만 입력한 경우 (예: ㅅㅌㅂㅅ)
             if (/^[ㄱ-ㅎ\s]+$/.test(query)) {
                 const dict = {
                     'ㅂㅇ': '병원', 'ㅈㅎㅂㅇ': '종합병원', 'ㄷㅎㅂㅇ': '대학병원', 'ㅎㅂㅂㅇ': '한방병원', 'ㅇㄹㅇ': '의료원',
@@ -336,6 +329,9 @@
             let keyword = (sido && sido !== "전국") ? `${sido} ${searchQuery}` : searchQuery;
             
             ps.keywordSearch(keyword, function(data, status) {
+                // 🚨 방어막: 카카오 통신이 끝났을 때 이미 메인 검색이 돌고 있다면 드롭다운을 띄우지 않음
+                if (document.getElementById('mainLoading').style.display === 'block') return;
+
                 if (status === kakao.maps.services.Status.OK) {
                     dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 상호명 (카카오 연동)</div>`;
                     data.slice(0, 10).forEach(item => {
@@ -358,13 +354,12 @@
         }
 
         // ==========================================
-        // 🚀 2. 건물명 / 도로명 검색일 경우 -> Supabase 초성 검색 및 일반 검색 분기
+        // 🚀 2. 건물명 / 도로명 검색일 경우 -> Supabase 초성/일반 검색
         // ==========================================
         try {
             let q = supabaseClient.from('elevators_raw').select('buld_nm, building_address');
             
             if (hasChosung) {
-                // 1) 초성이 하나라도 포함된 경우 -> 정규식(imatch) 사용
                 const chosungMap = {
                     'ㄱ': '[\uAC00-\uAE4B]', 'ㄲ': '[\uAE4C-\uB097]', 'ㄴ': '[\uB098-\uB2E3]', 'ㄷ': '[\uB2E4-\uB52F]', 'ㄸ': '[\uB530-\uB77B]',
                     'ㄹ': '[\uB77C-\uB9C7]', 'ㅁ': '[\uB9C8-\uBC13]', 'ㅂ': '[\uBC14-\uBE5F]', 'ㅃ': '[\uBE60-\uC0AB]', 'ㅅ': '[\uC0AC-\uC2F7]',
@@ -387,7 +382,6 @@
                 }
 
                 let pattern = patternParts.join("\\s?");
-                console.log(`🟣 [초성 정규식 변환] 패턴: ${pattern}`);
                 
                 if (sido && sido !== "전국") {
                     let shortSido = sido.substring(0, 2);
@@ -398,7 +392,6 @@
                 else if (searchType === 'address') q = q.filter('building_address', 'imatch', pattern);
 
             } else {
-                // 2) 초성이 없는 일반 텍스트 검색 -> ilike 사용 & 지역명 통합 처리 (덮어쓰기 에러 해결)
                 let safeQuery = query.replace(/\s+/g, '%');
                 safeQuery = safeQuery.replace(/([가-힣A-Za-z]+)(\d+)/g, '$1%$2');
                 safeQuery = safeQuery.replace(/(\d+)([가-힣A-Za-z]+)/g, '$1%$2');
@@ -407,36 +400,26 @@
                 
                 if (searchType === 'address' && sido && sido !== "전국") {
                     let shortSido = sido.substring(0, 2);
-                    // 🚨 핵심: "세종%산울%2%로%10%" 처럼 하나로 묶어 타임아웃 방지
                     likePattern = `${shortSido}%${safeQuery}%`;
-                    console.log(`🟣 [일반 도로명 통합 검색] 질의 패턴: ${likePattern}`);
                     q = q.ilike('building_address', likePattern);
-                    
                 } else if (searchType === 'address') {
                     likePattern = `%${safeQuery}%`;
-                    console.log(`🟣 [일반 도로명 전국 검색] 질의 패턴: ${likePattern}`);
                     q = q.ilike('building_address', likePattern);
-                    
                 } else if (searchType === 'building') {
-                    // 건물명 검색일 때는 서로 다른 컬럼(building_address, buld_nm)을 쓰므로 덮어쓰기 문제없음
                     if (sido && sido !== "전국") {
                         let shortSido = sido.substring(0, 2);
                         q = q.ilike('building_address', `${shortSido}%`);
                     }
                     q = q.ilike('buld_nm', `%${safeQuery}%`);
-                    console.log(`🟣 [일반 건물명 검색] 질의 패턴: %${safeQuery}%`);
                 }
             }
 
-            console.log(`📡 [Supabase 요청 발송] 데이터를 기다리는 중...`);
             const { data, error } = await q.limit(15);
             
-            if (error) {
-                console.error(`❌ [Supabase 에러 발생]`, error);
-                return;
-            }
+            // 🚨 방어막: Supabase 통신이 끝났을 때 이미 메인 검색이 돌고 있다면 드롭다운을 띄우지 않음
+            if (document.getElementById('mainLoading').style.display === 'block') return;
 
-            console.log(`✅ [Supabase 응답 성공] ${data.length}건의 데이터를 가져왔습니다.`);
+            if (error) return;
 
             dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 ${searchType === 'building' ? '건물명' : '도로명'}</div>`;
 
@@ -466,9 +449,7 @@
                 });
             }
             dropdown.style.display = 'block';
-        } catch (e) {
-            console.error("❌ [자동완성 시스템 크래시 예외 발생]:", e);
-        }
+        } catch (e) {}
     }
     function selectAutocomplete(buldNm, address) {
         const searchType = document.getElementById('searchType').value;
@@ -582,7 +563,12 @@
         if (!fullAddress) return { searchKeyword: "", address2: "", sigungu: "" };
         
         let clean = fullAddress.replace(/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\s]*\s+/, '');
-        clean = clean.replace(/([가-힣A-Za-z]+[길로동읍면])(\d+)/g, '$1 $2'); 
+        
+        // [추가1] '산울 2로' 처럼 띄어 쓴 도로명을 붙여주기 -> 산울2로
+        clean = clean.replace(/([가-힣]+)\s+(\d+[길로동읍면])/g, '$1$2'); 
+        
+        // 🚨 [추가2] '산울2로10' 처럼 도로명과 번지가 딱 붙어있는 경우 강제로 띄어쓰기 삽입 -> 산울2로 10
+        clean = clean.replace(/([가-힣A-Za-z0-9]+[길로동읍면])\s*(\d+)/g, '$1 $2'); 
         
         let words = clean.trim().split(/\s+/);
         let numIdx = -1;
@@ -590,7 +576,6 @@
         
         let searchKeyword = numIdx !== -1 ? (words[numIdx - 1] || "") : (words[words.length - 1] || "");
         let address2 = numIdx !== -1 ? words[numIdx] : "";
-        
         let sigungu = numIdx > 1 ? words[numIdx - 2] : ""; 
         
         return { 
