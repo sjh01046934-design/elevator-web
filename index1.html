@@ -329,7 +329,8 @@
             let keyword = (sido && sido !== "전국") ? `${sido} ${searchQuery}` : searchQuery;
             
             ps.keywordSearch(keyword, function(data, status) {
-                // 🚨 방어막: 카카오 통신이 끝났을 때 이미 메인 검색이 돌고 있다면 드롭다운을 띄우지 않음
+                // 🚨 [강력 방어막 1] 검색 버튼/엔터를 눌러서 입력창 커서가 사라졌거나, 로딩창이 켜졌다면 즉시 폐기!
+                if (document.activeElement !== document.getElementById('searchInput')) return;
                 if (document.getElementById('mainLoading').style.display === 'block') return;
 
                 if (status === kakao.maps.services.Status.OK) {
@@ -354,7 +355,7 @@
         }
 
         // ==========================================
-        // 🚀 2. 건물명 / 도로명 검색일 경우 -> Supabase 초성/일반 검색
+        // 🚀 2. 건물명 / 도로명 검색일 경우 -> Supabase 초성/일반 검색 분기
         // ==========================================
         try {
             let q = supabaseClient.from('elevators_raw').select('buld_nm, building_address');
@@ -416,7 +417,8 @@
 
             const { data, error } = await q.limit(15);
             
-            // 🚨 방어막: Supabase 통신이 끝났을 때 이미 메인 검색이 돌고 있다면 드롭다운을 띄우지 않음
+            // 🚨 [강력 방어막 2] 사용자가 엔터를 치거나 검색버튼을 눌러 커서가 빠져나갔다면 즉시 폐기!
+            if (document.activeElement !== document.getElementById('searchInput')) return;
             if (document.getElementById('mainLoading').style.display === 'block') return;
 
             if (error) return;
