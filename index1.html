@@ -278,10 +278,8 @@
         const sido = document.getElementById('sidoSelector').value;
         const hasChosung = /[ㄱ-ㅎ]/.test(query);
 
-        // ==========================================
-        // 🚀 1. 상호명 검색일 경우 -> 카카오 API 호출
-        // ==========================================
         if (searchType === 'place') {
+            // [상호명 검색 로직은 기존과 동일하므로 생략 없이 유지]
             let searchQuery = query;
 
             if (/^[ㄱ-ㅎ\s]+$/.test(query)) {
@@ -329,7 +327,6 @@
             let keyword = (sido && sido !== "전국") ? `${sido} ${searchQuery}` : searchQuery;
             
             ps.keywordSearch(keyword, function(data, status) {
-                // 🚨 [강력 방어막 1] 검색 버튼/엔터를 눌러서 입력창 커서가 사라졌거나, 로딩창이 켜졌다면 즉시 폐기!
                 if (document.activeElement !== document.getElementById('searchInput')) return;
                 if (document.getElementById('mainLoading').style.display === 'block') return;
 
@@ -354,9 +351,6 @@
             return; 
         }
 
-        // ==========================================
-        // 🚀 2. 건물명 / 도로명 검색일 경우 -> Supabase 초성/일반 검색 분기
-        // ==========================================
         try {
             let q = supabaseClient.from('elevators_raw').select('buld_nm, building_address');
             
@@ -384,8 +378,10 @@
 
                 let pattern = patternParts.join("\\s?");
                 
+                // 🚨 [수정핵심] DB 초성검색 시 공식 명칭(apiSido) 기준 적용
                 if (sido && sido !== "전국") {
-                    let shortSido = sido.substring(0, 2);
+                    let apiSido = FULL_SIDO_MAP[sido] || sido;
+                    let shortSido = apiSido.substring(0, 2);
                     q = q.ilike('building_address', `${shortSido}%`);
                 }
                 
@@ -400,7 +396,9 @@
                 let likePattern = '';
                 
                 if (searchType === 'address' && sido && sido !== "전국") {
-                    let shortSido = sido.substring(0, 2);
+                    // 🚨 [수정핵심] DB 주소 검색 시 공식 명칭 기준 적용
+                    let apiSido = FULL_SIDO_MAP[sido] || sido;
+                    let shortSido = apiSido.substring(0, 2);
                     likePattern = `${shortSido}%${safeQuery}%`;
                     q = q.ilike('building_address', likePattern);
                 } else if (searchType === 'address') {
@@ -408,7 +406,9 @@
                     q = q.ilike('building_address', likePattern);
                 } else if (searchType === 'building') {
                     if (sido && sido !== "전국") {
-                        let shortSido = sido.substring(0, 2);
+                        // 🚨 [수정핵심] DB 건물명 검색 시 공식 명칭 기준 적용
+                        let apiSido = FULL_SIDO_MAP[sido] || sido;
+                        let shortSido = apiSido.substring(0, 2);
                         q = q.ilike('building_address', `${shortSido}%`);
                     }
                     q = q.ilike('buld_nm', `%${safeQuery}%`);
@@ -417,10 +417,8 @@
 
             const { data, error } = await q.limit(15);
             
-            // 🚨 [강력 방어막 2] 사용자가 엔터를 치거나 검색버튼을 눌러 커서가 빠져나갔다면 즉시 폐기!
             if (document.activeElement !== document.getElementById('searchInput')) return;
             if (document.getElementById('mainLoading').style.display === 'block') return;
-
             if (error) return;
 
             dropdown.innerHTML = `<div class="dropdown-header">🔍 추천 ${searchType === 'building' ? '건물명' : '도로명'}</div>`;
@@ -597,10 +595,11 @@
             let originalAddr = String(item.building_address || item.address1 || item.address || "");
             
             if (selectedSido && selectedSido !== "전국") {
-                let shortSido = selectedSido.substring(0, 2); 
-                let addrFirstWord = originalAddr.trim().split(/\s+/)[0]; 
-                let matched = addrFirstWord.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
+                // 🚨 [수정핵심] "충청남도"가 들어와도 SIDO_PREFIX_MAP["충남"]과 자동 매핑되도록 처리
+                let searchKey = Object.keys(FULL_SIDO_MAP).find(key => FULL_SIDO_MAP[key] === selectedSido) || selectedSido;
+                const validPrefixes = SIDO_PREFIX_MAP[searchKey] || [searchKey, selectedSido];
                 
+                let matched = validPrefixes.some(prefix => originalAddr.includes(prefix) || (item.sido && String(item.sido).includes(prefix)));
                 if (!matched) return false; 
             }
             
@@ -926,17 +925,13 @@ if (data && data.length > 0) {
             try {
                 if (searchType === 'building') {
                     let queryBuilder = supabaseClient.from('elevators_raw').select('*').ilike('buld_nm', `%${query}%`);
-                    if (sido && sido !== "전국") {
-                        let shortSido = sido.substring(0, 2);
+                    if (apiSido && apiSido !== "전국") {
+                        // 🚨 [수정핵심] sido 대신 공식 명칭 apiSido 앞 두글자 추출
+                        let shortSido = apiSido.substring(0, 2);
                         queryBuilder = queryBuilder.ilike('building_address', `${shortSido}%`);
                     }
                     const { data, error } = await queryBuilder.limit(500);
-                    
-                    // 👇 건물명 검색 에러 상세 추적
-                    if (error) {
-                        console.error("=== 🚨 [건물명 검색] Supabase 에러 🚨 ===");
-                        console.error(JSON.stringify(error, null, 2));
-                    }
+                    if (error) console.warn("Supabase 에러 방어:", error);
                     if (data) dbItems = data;
                 } else {
                     const rParams = extractAddressParams(query);
@@ -950,36 +945,25 @@ if (data && data.length > 0) {
                     } else if (rParams.searchKeyword) {
                         rSearchPattern = `%${rParams.searchKeyword}%`;
                     } else {
-                        // 추출 실패 시 텍스트 정제 후 기본 패턴 생성
                         let safeQuery = query.replace(/\s+/g, '%');
                         safeQuery = safeQuery.replace(/([가-힣A-Za-z]+)(\d+)/g, '$1%$2');
                         safeQuery = safeQuery.replace(/(\d+)([가-힣A-Za-z]+)/g, '$1%$2');
                         rSearchPattern = `%${safeQuery}%`;
                     }
 
-                    // 🚨 [핵심] 타임아웃 500 에러 방지를 위해, 지역명(sido)을 검색 패턴 맨 앞에 강제로 붙여버립니다!
                     let finalPattern = rSearchPattern;
-                    if (sido && sido !== "전국") {
-                        let shortSido = sido.substring(0, 2);
+                    if (apiSido && apiSido !== "전국") {
+                        // 🚨 [수정핵심] 여기도 공식 명칭 기준
+                        let shortSido = apiSido.substring(0, 2);
                         finalPattern = finalPattern.startsWith('%') ? `${shortSido}${finalPattern}` : `${shortSido}%${finalPattern}`;
                     }
 
-                    console.log(`🟣 [메인 검색] DB 도로명 질의 패턴: ${finalPattern}`);
-
                     const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', finalPattern).limit(500);
-                    
-                    // 👇 주소 검색 에러 상세 추적
-                    if (error) {
-                        console.error("=== 🚨 [주소 검색] Supabase 에러 🚨 ===");
-                        console.error("문제가 된 질의 패턴:", finalPattern);
-                        console.error(JSON.stringify(error, null, 2));
-                    }
+                    if (error) console.warn("Supabase 에러 방어:", error);
                     if (data) dbItems = data;
                 }
-            } catch (supaErr) { 
-                // 👇 통신 예외 상세 추적
-                console.error("=== 🚨 [메인 검색 통신 예외] 🚨 ===", supaErr); 
-            }
+            } catch (supaErr) { console.warn("Supabase 통신 예외:", supaErr); }
+
             if (dbItems.length > 0) {
                 validItems = dbItems.filter(item => {
                     if (searchType === 'building') {
@@ -987,10 +971,10 @@ if (data && data.length > 0) {
                         if (!nameMatch) return false;
                         
                         if (sido && sido !== "전국") {
-                            let shortSido = sido.substring(0, 2);
+                            // 🚨 [수정핵심] JS 필터링 시 '충남/충청남도' 유연한 확인
+                            const validPrefixes = SIDO_PREFIX_MAP[sido] || [sido, apiSido];
                             let originalAddr = String(item.building_address || item.address1 || item.address || "");
-                            let addrFirstWord = originalAddr.trim().split(/\s+/)[0];
-                            let matched = addrFirstWord.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
+                            let matched = validPrefixes.some(prefix => originalAddr.includes(prefix) || (item.sido && String(item.sido).includes(prefix)));
                             if (!matched) return false;
                         }
                         return true;
@@ -1011,10 +995,10 @@ if (data && data.length > 0) {
                         if (!nameMatch) return false;
                         
                         if (sido && sido !== "전국") {
-                            let shortSido = sido.substring(0, 2);
+                            // 🚨 [수정핵심] 공공데이터 응답값에 대한 필터링도 유연하게 처리
+                            const validPrefixes = SIDO_PREFIX_MAP[sido] || [sido, apiSido];
                             let originalAddr = String(item.building_address || item.address1 || item.address || "");
-                            let addrFirstWord = originalAddr.trim().split(/\s+/)[0];
-                            let matched = addrFirstWord.includes(shortSido) || (item.sido && String(item.sido).includes(shortSido));
+                            let matched = validPrefixes.some(prefix => originalAddr.includes(prefix) || (item.sido && String(item.sido).includes(prefix)));
                             if (!matched) return false;
                         }
                         return true;
