@@ -931,6 +931,12 @@ if (data && data.length > 0) {
                         queryBuilder = queryBuilder.ilike('building_address', `${shortSido}%`);
                     }
                     const { data, error } = await queryBuilder.limit(500);
+                    
+                    // 👇 건물명 검색 에러 상세 추적
+                    if (error) {
+                        console.error("=== 🚨 [건물명 검색] Supabase 에러 🚨 ===");
+                        console.error(JSON.stringify(error, null, 2));
+                    }
                     if (data) dbItems = data;
                 } else {
                     const rParams = extractAddressParams(query);
@@ -955,18 +961,25 @@ if (data && data.length > 0) {
                     let finalPattern = rSearchPattern;
                     if (sido && sido !== "전국") {
                         let shortSido = sido.substring(0, 2);
-                        // 예: "%산울2로%10%" -> "세종%산울2로%10%"
                         finalPattern = finalPattern.startsWith('%') ? `${shortSido}${finalPattern}` : `${shortSido}%${finalPattern}`;
                     }
 
                     console.log(`🟣 [메인 검색] DB 도로명 질의 패턴: ${finalPattern}`);
 
                     const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', finalPattern).limit(500);
-                    if (error) console.warn("Supabase 에러 방어:", error);
+                    
+                    // 👇 주소 검색 에러 상세 추적
+                    if (error) {
+                        console.error("=== 🚨 [주소 검색] Supabase 에러 🚨 ===");
+                        console.error("문제가 된 질의 패턴:", finalPattern);
+                        console.error(JSON.stringify(error, null, 2));
+                    }
                     if (data) dbItems = data;
                 }
-            } catch (supaErr) { console.warn("Supabase 통신 예외:", supaErr); }
-
+            } catch (supaErr) { 
+                // 👇 통신 예외 상세 추적
+                console.error("=== 🚨 [메인 검색 통신 예외] 🚨 ===", supaErr); 
+            }
             if (dbItems.length > 0) {
                 validItems = dbItems.filter(item => {
                     if (searchType === 'building') {
