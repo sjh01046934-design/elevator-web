@@ -646,12 +646,20 @@
 
                 console.log(`🟣 [정밀조회] DB 도로명 질의 패턴: ${finalPattern}`);
 
-                const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', finalPattern).limit(200); 
-                
-                if (error) console.error("[Query Error] Supabase 에러:", error);
-                
-                if (data && data.length > 0) {
-                    let validDbItems = filterValidElevators(data, null, rParams.searchKeyword, rParams.address2, null, null, apiSido);
+const { data, error } = await supabaseClient.from('elevators_raw').select('*').ilike('building_address', finalPattern).limit(200); 
+
+// 👇 기존 한 줄을 지우고 아래 8줄을 통째로 붙여넣으세요.
+if (error) {
+    console.error("=== 🚨 Supabase 검색 에러 상세 로그 🚨 ===");
+    console.error("1. 에러 메세지(Message):", error.message);
+    console.error("2. 에러 코드(Code):", error.code);
+    console.error("3. 에러 세부정보(Details):", error.details);
+    console.error("4. 에러 힌트(Hint):", error.hint);
+    console.error("5. 전체 에러 객체(JSON):", JSON.stringify(error, null, 2));
+}
+
+if (data && data.length > 0) {
+    let validDbItems = filterValidElevators(data, null, rParams.searchKeyword, rParams.address2, null, null, apiSido);
                     if (validDbItems.length > 0) return validDbItems;
                 }
             }
