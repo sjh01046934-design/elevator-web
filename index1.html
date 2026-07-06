@@ -1046,7 +1046,8 @@ if (data && data.length > 0) {
                 });
             }
 
-            const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || "상태불명").trim();
+            // 🚨 필드명 검사 강화
+            const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || apiItem.elvtr_stts || "상태불명").trim();
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
             
             const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); let refinedType = "승객용"; 
@@ -1202,7 +1203,8 @@ if (data && data.length > 0) {
         });
 
         group.elevators = elevs.map(apiItem => {
-            const stts = String(apiItem.elvtr_stts_nm || apiItem.elvtrSttsNm || apiItem.elvtrStts || "상태불명").trim();
+            // 🚨 필드명 검사 강화
+            const stts = String(apiItem.elvtr_stts_nm || apiItem.elvtrSttsNm || apiItem.elvtrStts || apiItem.elvtr_stts || "상태불명").trim();
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('연기') || stts.includes('폐지') || stts.includes('확인불가'));
             
             const rawType = String(apiItem.elvtr_kind_nm || apiItem.elvtrKindNm || apiItem.elvtrDivNm || ""); 
@@ -1282,6 +1284,8 @@ if (data && data.length > 0) {
             </table>
         `).join('');
 
+        let markerNeedsUpdate = false; // 🚨 상태 변경 추적용 플래그
+
         for (const elv of groupData.elevators) {
             await new Promise(r => setTimeout(r, 400));
             try {
@@ -1294,8 +1298,15 @@ if (data && data.length > 0) {
                 
                 if(item) {
                     const status = item.elvtrStts || "상태불명";
-                    const isOp = !(status.includes('정지') || status.includes('고장') || status.includes('불합격') || status.includes('휴지') || status.includes('연기') || status.includes('폐지'));
+                    const isOp = !(status.includes('정지') || status.includes('중지') || status.includes('고장') || status.includes('불합격') || status.includes('휴지') || status.includes('연기') || status.includes('폐지'));
                     
+                    // 🚨 실시간 상태를 데이터에 덮어쓰고, 마커 업데이트가 필요한지 체크
+                    if (elv.isOperating !== isOp) {
+                        elv.isOperating = isOp;
+                        markerNeedsUpdate = true;
+                    }
+                    elv.state = status;
+
                     document.getElementById(`shuttle-${eNo}`).innerText = item.shuttleSection || "구간없음";
                     
                     const badge = document.getElementById(`status-${eNo}`);
@@ -1305,6 +1316,11 @@ if (data && data.length > 0) {
                     }
                 }
             } catch(e) { console.error(e); }
+        }
+
+        // 🚨 실시간 상태 조회 후 "전체 운행중지" 조건이 충족되었다면 지도를 즉시 다시 그림
+        if (markerNeedsUpdate) {
+            renderData(true);
         }
     }
     
