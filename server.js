@@ -7,7 +7,7 @@ const NodeCache = require('node-cache');
 
 const app = express();
 app.use(cors()); 
-
+app.use(express.static(__dirname));
 const PUBLIC_API_KEY = 'bf828022bb4535034959395893c59397fff91ac219c93670610575093972289d';
 const statusCache = new NodeCache({ stdTTL: 600 });
 
