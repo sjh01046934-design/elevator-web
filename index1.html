@@ -130,26 +130,79 @@
         }
         .manual-close { font-size: 24px; cursor: pointer; padding: 5px; color: #ffcccc; }
         
+        /* 🚨 하얀 공백 방지를 위한 1:1 정사각형 감싸기 박스 */
+        .manual-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 412px;
+            aspect-ratio: 1 / 1; /* 가로세로 비율을 무조건 1:1로 고정 */
+            display: flex;
+            align-items: center;
+        }
+
         .manual-slider {
-            width: 100%; max-width: 412px; height: 75vh; display: flex;
-            overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth;
-            -webkit-overflow-scrolling: touch; padding-bottom: 20px;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            overflow-x: auto;
+            scroll-snap-type: x mandatory;
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch;
         }
         .manual-slider::-webkit-scrollbar { display: none; }
         
         .manual-slide {
-            flex: 0 0 100%; height: 100%; scroll-snap-align: center;
-            display: flex; justify-content: center; align-items: center; padding: 0 16px;
+            flex: 0 0 100%;
+            height: 100%;
+            scroll-snap-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 0 16px;
         }
         .manual-slide img {
-            width: 100%; height: 100%; object-fit: contain;
-            border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-            background: white;
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* 정사각형 컨테이너에 이미지를 꽉 채움 */
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
         }
         
+        /* 🚨 좌우 이동 화살표 스타일 */
+        .manual-arrow {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 36px;
+            height: 36px;
+            background: rgba(255, 255, 255, 0.85);
+            color: #1e4e79;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 100;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            border: none;
+            outline: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .manual-arrow:active { background: white; transform: translateY(-50%) scale(0.95); }
+        .arrow-left { left: 24px; }
+        .arrow-right { right: 24px; }
+        
         .manual-indicator {
-            position: absolute; bottom: 30px; background: rgba(255,255,255,0.2);
-            color: white; padding: 6px 16px; border-radius: 20px; font-size: 14px; font-weight: bold;
+            margin-top: 25px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -254,13 +307,19 @@
         <span class="manual-close" onclick="closeManual()">✖</span>
     </div>
     
-    <div class="manual-slider" id="manualSlider" onscroll="updateManualPage()">
-        <div class="manual-slide"><img src="manual_page1.png" alt="매뉴얼 1페이지"></div>
-        <div class="manual-slide"><img src="manual_page2.png" alt="매뉴얼 2페이지"></div>
-        <div class="manual-slide"><img src="manual_page3.png" alt="매뉴얼 3페이지"></div>
-        <div class="manual-slide"><img src="manual_page4.png" alt="매뉴얼 4페이지"></div>
-        <div class="manual-slide"><img src="manual_page5.png" alt="매뉴얼 5페이지"></div>
-        <div class="manual-slide"><img src="manual_page6.png" alt="매뉴얼 6페이지"></div>
+    <div class="manual-wrapper">
+        <button class="manual-arrow arrow-left" onclick="moveManual(-1)">❮</button>
+        
+        <div class="manual-slider" id="manualSlider" onscroll="updateManualPage()">
+            <div class="manual-slide"><img src="manual_page1.png" alt="매뉴얼 1페이지"></div>
+            <div class="manual-slide"><img src="manual_page2.png" alt="매뉴얼 2페이지"></div>
+            <div class="manual-slide"><img src="manual_page3.png" alt="매뉴얼 3페이지"></div>
+            <div class="manual-slide"><img src="manual_page4.png" alt="매뉴얼 4페이지"></div>
+            <div class="manual-slide"><img src="manual_page5.png" alt="매뉴얼 5페이지"></div>
+            <div class="manual-slide"><img src="manual_page6.png" alt="매뉴얼 6페이지"></div>
+        </div>
+        
+        <button class="manual-arrow arrow-right" onclick="moveManual(1)">❯</button>
     </div>
     
     <div class="manual-indicator"><span id="manualCurrentPage">1</span> / 6</div>
@@ -569,6 +628,7 @@
     }
 
     function closeManual() {
+        document.getElementById('manualOverlay').classList.remove('remove'); // 기존 오타 방어용 안전 삭제
         document.getElementById('manualOverlay').classList.remove('active');
     }
 
@@ -576,6 +636,13 @@
         const slider = document.getElementById('manualSlider');
         const currentPage = Math.round(slider.scrollLeft / slider.clientWidth) + 1;
         document.getElementById('manualCurrentPage').innerText = currentPage;
+    }
+
+    // 🚨 화살표 터치 클릭 시 양옆으로 화면을 밀어주는 고속 이동 함수
+    function moveManual(direction) {
+        const slider = document.getElementById('manualSlider');
+        // direction이 -1이면 왼쪽으로, 1이면 오른쪽으로 너비만큼 스크롤 이동
+        slider.scrollLeft += direction * slider.clientWidth;
     }
     // 👇 여기서부터 복사해서 추가하세요.
     function openCustomerService() {
