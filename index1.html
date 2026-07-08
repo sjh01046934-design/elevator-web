@@ -118,7 +118,7 @@
 
         .manual-overlay {
             display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.85); z-index: 99999; flex-direction: column;
+            background: rgba(0,0,0,0.9); z-index: 99999; flex-direction: column;
             justify-content: center; align-items: center; backdrop-filter: blur(3px);
         }
         .manual-overlay.active { display: flex; }
@@ -130,12 +130,11 @@
         }
         .manual-close { font-size: 24px; cursor: pointer; padding: 5px; color: #ffcccc; }
         
-        /* 🚨 하얀 공백 방지를 위한 1:1 정사각형 감싸기 박스 */
         .manual-wrapper {
             position: relative;
             width: 100%;
             max-width: 412px;
-            aspect-ratio: 1 / 1; /* 가로세로 비율을 무조건 1:1로 고정 */
+            aspect-ratio: 1 / 1;
             display: flex;
             align-items: center;
         }
@@ -158,25 +157,30 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 0 16px;
+            padding: 0 20px; /* 🚨 좌우에 안전 여백을 주어 잘림 현상 원천 차단 */
         }
         .manual-slide img {
             width: 100%;
             height: 100%;
-            object-fit: cover; /* 정사각형 컨테이너에 이미지를 꽉 채움 */
+            object-fit: contain; /* 🚨 크기 왜곡이나 잘림 없이 원본 비율 그대로 빈 공간에 맞춤 */
             border-radius: 12px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.5);
         }
         
-        /* 🚨 좌우 이동 화살표 스타일 */
-        .manual-arrow {
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 36px;
-            height: 36px;
-            background: rgba(255, 255, 255, 0.85);
-            color: #1e4e79;
+        /* 🚨 하단 화살표 + 페이지 표시 통합 컨트롤러 레이아웃 */
+        .manual-controls-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .manual-arrow-bottom {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             display: flex;
             justify-content: center;
@@ -184,25 +188,22 @@
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
-            z-index: 100;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            border: none;
             outline: none;
             user-select: none;
             -webkit-tap-highlight-color: transparent;
         }
-        .manual-arrow:active { background: white; transform: translateY(-50%) scale(0.95); }
-        .arrow-left { left: 24px; }
-        .arrow-right { right: 24px; }
+        .manual-arrow-bottom:active { background: rgba(255, 255, 255, 0.4); }
         
-        .manual-indicator {
-            margin-top: 25px;
-            background: rgba(255,255,255,0.2);
+        .manual-indicator-fixed {
+            background: rgba(255,255,255,0.15);
             color: white;
-            padding: 6px 16px;
+            padding: 8px 20px;
             border-radius: 20px;
             font-size: 14px;
             font-weight: bold;
+            min-width: 70px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
     </style>
 </head>
@@ -308,8 +309,6 @@
     </div>
     
     <div class="manual-wrapper">
-        <button class="manual-arrow arrow-left" onclick="moveManual(-1)">❮</button>
-        
         <div class="manual-slider" id="manualSlider" onscroll="updateManualPage()">
             <div class="manual-slide"><img src="manual_page1.png" alt="매뉴얼 1페이지"></div>
             <div class="manual-slide"><img src="manual_page2.png" alt="매뉴얼 2페이지"></div>
@@ -318,11 +317,13 @@
             <div class="manual-slide"><img src="manual_page5.png" alt="매뉴얼 5페이지"></div>
             <div class="manual-slide"><img src="manual_page6.png" alt="매뉴얼 6페이지"></div>
         </div>
-        
-        <button class="manual-arrow arrow-right" onclick="moveManual(1)">❯</button>
     </div>
     
-    <div class="manual-indicator"><span id="manualCurrentPage">1</span> / 6</div>
+    <div class="manual-controls-container">
+        <button class="manual-arrow-bottom" onclick="moveManual(-1)">❮</button>
+        <div class="manual-indicator-fixed"><span id="manualCurrentPage">1</span> / 6</div>
+        <button class="manual-arrow-bottom" onclick="moveManual(1)">❯</button>
+    </div>
 </div>
 <script>
     let map, clusterer, geocoder, places;
@@ -628,7 +629,6 @@
     }
 
     function closeManual() {
-        document.getElementById('manualOverlay').classList.remove('remove'); // 기존 오타 방어용 안전 삭제
         document.getElementById('manualOverlay').classList.remove('active');
     }
 
@@ -638,10 +638,8 @@
         document.getElementById('manualCurrentPage').innerText = currentPage;
     }
 
-    // 🚨 화살표 터치 클릭 시 양옆으로 화면을 밀어주는 고속 이동 함수
     function moveManual(direction) {
         const slider = document.getElementById('manualSlider');
-        // direction이 -1이면 왼쪽으로, 1이면 오른쪽으로 너비만큼 스크롤 이동
         slider.scrollLeft += direction * slider.clientWidth;
     }
     // 👇 여기서부터 복사해서 추가하세요.
