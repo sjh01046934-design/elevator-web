@@ -111,6 +111,7 @@
     <div class="fab-container">
         <div class="fab-btn" onclick="resetMap()">첫화면</div>
         <div class="fab-btn" onclick="moveToMyLocation()">내위치</div>
+        <div class="fab-btn" onclick="openCustomerService()" style="color: #d32f2f; border-color: #ffcccc; background-color: #fff9f9;">고객센터</div>
     </div>
 
     <div class="search-bar-wrapper">
@@ -484,6 +485,13 @@
                 map.setLevel(4); hideLoadingMsg();
             }, function() { alert("GPS 위치 권한을 확인해주세요."); hideLoadingMsg(); }, { timeout: 10000 });
         }
+    }
+
+    // 👇 여기서부터 복사해서 추가하세요.
+    function openCustomerService() {
+        // 대리님이 새로 만드신 네이버 폼 URL을 아래 따옴표 안에 넣어주세요!
+        const naverFormUrl = "https://form.naver.com/https://naver.me/G4d3GFEh";
+        window.open(naverFormUrl, '_blank');
     }
 
     function showLoadingMsg(text) { document.getElementById('loadingText').innerText = text; document.getElementById('searchLoadingMsg').style.display = 'block'; }
