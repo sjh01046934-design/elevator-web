@@ -96,6 +96,61 @@
         .custom-marker.dummy::after { border-color: #fff transparent; }
         .custom-marker.no-elv { background-color: #e2e8f0; color: #64748b; border-color: #cbd5e1; }
         .custom-marker.no-elv::after { border-color: #e2e8f0 transparent; }
+        /* ==========================================
+           📖 여기서부터 [매뉴얼 스타일] 코드를 붙여넣으세요
+           ========================================== */
+        .btn-manual {
+            position: absolute;
+            top: 15px;
+            right: 16px;
+            background: white;
+            color: #1e4e79;
+            border: 2px solid #1e4e79;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 20;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+        .btn-manual:active { background: #f0f4f8; }
+
+        .manual-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85); z-index: 99999; flex-direction: column;
+            justify-content: center; align-items: center; backdrop-filter: blur(3px);
+        }
+        .manual-overlay.active { display: flex; }
+        
+        .manual-header {
+            width: 100%; max-width: 412px; display: flex; justify-content: space-between;
+            align-items: center; padding: 16px 20px; color: white; font-weight: bold;
+            position: absolute; top: 0;
+        }
+        .manual-close { font-size: 24px; cursor: pointer; padding: 5px; color: #ffcccc; }
+        
+        .manual-slider {
+            width: 100%; max-width: 412px; height: 75vh; display: flex;
+            overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch; padding-bottom: 20px;
+        }
+        .manual-slider::-webkit-scrollbar { display: none; }
+        
+        .manual-slide {
+            flex: 0 0 100%; height: 100%; scroll-snap-align: center;
+            display: flex; justify-content: center; align-items: center; padding: 0 16px;
+        }
+        .manual-slide img {
+            width: 100%; height: 100%; object-fit: contain;
+            border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            background: white;
+        }
+        
+        .manual-indicator {
+            position: absolute; bottom: 30px; background: rgba(255,255,255,0.2);
+            color: white; padding: 6px 16px; border-radius: 20px; font-size: 14px; font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -115,6 +170,8 @@
     </div>
 
     <div class="search-bar-wrapper">
+        <div class="btn-manual" onclick="openManual()">메뉴얼</div>
+        
         <div class="page-header">
             <h1>엘리맵</h1>
             <p>승강기 설치유무검색서비스</p>
@@ -191,7 +248,23 @@
         </div>
     </div> 
 </div> 
-
+<div id="manualOverlay" class="manual-overlay">
+    <div class="manual-header">
+        <span>사용자 매뉴얼</span>
+        <span class="manual-close" onclick="closeManual()">✖</span>
+    </div>
+    
+    <div class="manual-slider" id="manualSlider" onscroll="updateManualPage()">
+        <div class="manual-slide"><img src="manual_page1.png" alt="매뉴얼 1페이지"></div>
+        <div class="manual-slide"><img src="manual_page2.png" alt="매뉴얼 2페이지"></div>
+        <div class="manual-slide"><img src="manual_page3.png" alt="매뉴얼 3페이지"></div>
+        <div class="manual-slide"><img src="manual_page4.png" alt="매뉴얼 4페이지"></div>
+        <div class="manual-slide"><img src="manual_page5.png" alt="매뉴얼 5페이지"></div>
+        <div class="manual-slide"><img src="manual_page6.png" alt="매뉴얼 6페이지"></div>
+    </div>
+    
+    <div class="manual-indicator"><span id="manualCurrentPage">1</span> / 6</div>
+</div>
 <script>
     let map, clusterer, geocoder, places;
     let lastQuery = '', lastSido = '';
@@ -486,7 +559,24 @@
             }, function() { alert("GPS 위치 권한을 확인해주세요."); hideLoadingMsg(); }, { timeout: 10000 });
         }
     }
+// ==========================================
+    // 📖 여기에 [매뉴얼 제어 함수] 코드를 붙여넣으세요
+    // ==========================================
+    function openManual() {
+        document.getElementById('manualOverlay').classList.add('active');
+        document.getElementById('manualSlider').scrollLeft = 0; 
+        document.getElementById('manualCurrentPage').innerText = 1;
+    }
 
+    function closeManual() {
+        document.getElementById('manualOverlay').classList.remove('active');
+    }
+
+    function updateManualPage() {
+        const slider = document.getElementById('manualSlider');
+        const currentPage = Math.round(slider.scrollLeft / slider.clientWidth) + 1;
+        document.getElementById('manualCurrentPage').innerText = currentPage;
+    }
     // 👇 여기서부터 복사해서 추가하세요.
     function openCustomerService() {
         // 대리님이 새로 만드신 네이버 폼 URL을 아래 따옴표 안에 넣어주세요!
