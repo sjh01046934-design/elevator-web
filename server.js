@@ -116,7 +116,7 @@ app.get('/api/realtime-status', async (req, res) => {
         res.json({ status: "통신에러" });
     }
 });
-
+app.get('/ping', (req, res) => { res.send('OK'); });
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index1.html')); });
 app.listen(3000, () => { console.log("🚀 백엔드 주소 매칭 및 제원 분석 엔진 가동!"); });
 module.exports = app;
