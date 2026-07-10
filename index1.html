@@ -282,9 +282,10 @@
                         <path d="M19,5v14H5V5H19 M19,3H5C3.9,3,3,3.9,3,5v14c0,1.1,0.9,2,2,2h14c1.1,0,2-0.9,2-2V5C21,3.9,20.1,3,19,3L19,3z M10,18v-4h1 v-2.5c0-1.1-0.9-2-2-2H8c-1.1,0-2,0.9-2,2V14h1v4H10z M8.5,8.5c0.69,0,1.25-0.56,1.25-1.25S9.19,6,8.5,6S7.25,6.56,7.25,7.25 S7.81,8.5,8.5,8.5z M18,11l-2.5-4L13,11H18z M13,13l2.5,4l2.5-4H13z"/>
                     </svg>
                 </div>
-                <div>
+               <div>
                     <div class="status-title" id="resBuildingName">건물명</div>
                     <div class="address-text" id="resAddress">주소</div>
+                    <div class="address-text" id="resRealBuildingName" style="color:#1e4e79; font-weight:bold; margin-top:4px; display:none;"></div>
                 </div>
             </div>
 
@@ -1013,7 +1014,11 @@ if (data && data.length > 0) {
                 const elvNo = apiItem.elevatorNo || apiItem.elevator_no;
                 if (elvNo && !uniqueMap.has(elvNo)) {
                     let origBuldNm = String(apiItem.buldNm || apiItem.buld_nm || "").trim();
-                    apiItem.customBuldNm = (!origBuldNm || origBuldNm === "null" || origBuldNm.includes("없음")) ? placeName : `${placeName} [${origBuldNm}]`;
+                    // 🚨 수정: 상호명과 진짜 건물명을 분리해서 저장
+                    apiItem.customBuldNm = placeName;
+                    if (origBuldNm && origBuldNm !== "null" && !origBuldNm.includes("없음")) {
+                        apiItem.realBuldNm = origBuldNm;
+                    }
                     uniqueMap.set(elvNo, apiItem);
                 }
             });
@@ -1047,7 +1052,11 @@ if (data && data.length > 0) {
                 const elvNo = item.elevatorNo || item.elevator_no;
                 if (elvNo && !uniqueMap.has(elvNo)) {
                     let origBuldNm = String(item.buldNm || item.buld_nm || "").trim();
-                    item.customBuldNm = (!origBuldNm || origBuldNm === "null" || origBuldNm.includes("없음")) ? placeName : `${placeName} [${origBuldNm}]`; 
+                    // 🚨 수정: 상호명과 진짜 건물명을 분리해서 저장
+                    item.customBuldNm = placeName; 
+                    if (origBuldNm && origBuldNm !== "null" && !origBuldNm.includes("없음")) {
+                        item.realBuldNm = origBuldNm;
+                    }
                     uniqueMap.set(elvNo, item);
                 }
             });
@@ -1194,6 +1203,10 @@ if (data && data.length > 0) {
 
         allElevatorsData.forEach(apiItem => {
             const buldNm = apiItem.customBuldNm || apiItem.buldNm || apiItem.buld_nm || "건물명 없음";
+            // 🚨 수정: 분리된 진짜 건물명 세팅
+            let realBuldNm = apiItem.realBuldNm || apiItem.buldNm || apiItem.buld_nm || "";
+            if (realBuldNm === "null" || realBuldNm.includes("없음")) realBuldNm = "";
+
             const addr1 = String(apiItem.building_address || apiItem.address1 || apiItem.address || ""); 
             const addr2 = String(apiItem.address2 || "");
             const address = (addr1 + " " + addr2).trim() || "주소 없음"; 
@@ -1201,7 +1214,9 @@ if (data && data.length > 0) {
 
             if (!groupedMap.has(key)) {
                 groupedMap.set(key, {
-                    buildingName: buldNm, address: address,
+                    buildingName: buldNm, 
+                    realBuildingName: realBuldNm, // 진짜 건물명 속성 추가
+                    address: address,
                     roadAddress: addr1 + " " + addr2, jibunAddress: addr1 + " " + addr2,
                     lat: parseFloat(apiItem.gpsLati || apiItem.gps_lati) || null,
                     lng: parseFloat(apiItem.gpsLong || apiItem.gps_long) || null,
@@ -1209,7 +1224,6 @@ if (data && data.length > 0) {
                 });
             }
 
-            // 🚨 필드명 검사 강화
             const stts = String(apiItem.elvtrSttsNm || apiItem.elvtr_stts_nm || apiItem.elvtrStts || apiItem.elvtr_stts || "상태불명").trim();
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('검사연기') || stts.includes('폐지') || stts.includes('확인불가'));
             
@@ -1352,8 +1366,9 @@ if (data && data.length > 0) {
         if (validItems && validItems.length > 0) {
             let firstItem = validItems[0];
             let origBuldNm = String(firstItem.buldNm || firstItem.buld_nm || "").trim();
-            if (origBuldNm && origBuldNm !== "null" && !origBuldNm.includes("없음") && !group.buildingName.includes(origBuldNm)) {
-                group.buildingName = `${group.buildingName} [${origBuldNm}]`;
+            // 🚨 수정: 제목에 대괄호로 붙이지 않고, 분리된 필드에 진짜 건물명 보관
+            if (origBuldNm && origBuldNm !== "null" && !origBuldNm.includes("없음")) {
+                group.realBuildingName = origBuldNm;
             }
         }
 
@@ -1366,7 +1381,6 @@ if (data && data.length > 0) {
         });
 
         group.elevators = elevs.map(apiItem => {
-            // 🚨 필드명 검사 강화
             const stts = String(apiItem.elvtr_stts_nm || apiItem.elvtrSttsNm || apiItem.elvtrStts || apiItem.elvtr_stts || "상태불명").trim();
             const isOperating = !(stts.includes('정지') || stts.includes('중지') || stts.includes('불합격') || stts.includes('고장') || stts.includes('폐기') || stts.includes('휴지') || stts.includes('연기') || stts.includes('폐지') || stts.includes('확인불가'));
             
@@ -1414,6 +1428,15 @@ if (data && data.length > 0) {
         document.getElementById('resBuildingName').innerText = groupData.buildingName;
         document.getElementById('resAddress').innerText = groupData.address;
         
+        // 🚨 수정: 분리된 진짜 건물명을 주소 밑에 (건물명 : @@@) 형식으로 렌더링
+        const realBuldEl = document.getElementById('resRealBuildingName');
+        if (groupData.realBuildingName && groupData.realBuildingName !== groupData.buildingName) {
+            realBuldEl.innerText = `(건물명 : ${groupData.realBuildingName})`;
+            realBuldEl.style.display = 'block';
+        } else {
+            realBuldEl.style.display = 'none';
+        }
+        
         document.getElementById('btnRoadview').href = `https://map.kakao.com/link/roadview/${groupData.lat},${groupData.lng}`;
         document.getElementById('btnDirections').href = `https://map.kakao.com/link/to/${encodeURIComponent(groupData.buildingName)},${groupData.lat},${groupData.lng}`;
         
@@ -1424,6 +1447,13 @@ if (data && data.length > 0) {
             listContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:#1e4e79; font-weight:bold;">⏳ 승강기 정보 분석 중...<br><span style="font-size:12px; color:#666;">(잠시만 기다려주세요)</span></div>';
             
             await hydrateDummyGroup(groupData, new AbortController().signal);
+            
+            // 🚨 수정: 스캔 대기 마커(더미)에서 진짜 건물명을 새로 가져왔다면 화면 즉시 갱신
+            if (groupData.realBuildingName && groupData.realBuildingName !== groupData.buildingName) {
+                realBuldEl.innerText = `(건물명 : ${groupData.realBuildingName})`;
+                realBuldEl.style.display = 'block';
+            }
+
             renderData(true); 
             
             if (groupData.noElevator || groupData.elevators.length === 0) {
@@ -1447,7 +1477,7 @@ if (data && data.length > 0) {
             </table>
         `).join('');
 
-        let markerNeedsUpdate = false; // 🚨 상태 변경 추적용 플래그
+        let markerNeedsUpdate = false; 
 
         for (const elv of groupData.elevators) {
             await new Promise(r => setTimeout(r, 400));
@@ -1463,7 +1493,6 @@ if (data && data.length > 0) {
                     const status = item.elvtrStts || "상태불명";
                     const isOp = !(status.includes('정지') || status.includes('중지') || status.includes('고장') || status.includes('불합격') || status.includes('휴지') || status.includes('연기') || status.includes('폐지'));
                     
-                    // 🚨 실시간 상태를 데이터에 덮어쓰고, 마커 업데이트가 필요한지 체크
                     if (elv.isOperating !== isOp) {
                         elv.isOperating = isOp;
                         markerNeedsUpdate = true;
@@ -1481,7 +1510,6 @@ if (data && data.length > 0) {
             } catch(e) { console.error(e); }
         }
 
-        // 🚨 실시간 상태 조회 후 "전체 운행중지" 조건이 충족되었다면 지도를 즉시 다시 그림
         if (markerNeedsUpdate) {
             renderData(true);
         }
